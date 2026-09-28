@@ -80,7 +80,7 @@ def query() -> str:
         f'node["name"]["shop"]{box};'
         f'node["name"]["leisure"]{box};'
         f'node["name"]["tourism"]{box};'
-        ");out center tags;"
+        ");out geom tags;"
     )
 
 
@@ -101,13 +101,64 @@ def fetch(q: str) -> dict:
     raise RuntimeError(f"Overpass に繋がらない: {last}")
 
 
-def centre(el: dict) -> tuple[float, float] | None:
-    if "lat" in el and "lon" in el:
-        return el["lat"], el["lon"]
-    c = el.get("center")
-    if c:
-        return c["lat"], c["lon"]
+def poly(el: dict) -> list[tuple[float, float]] | None:
+    """要素の輪郭を (緯度, 経度) の並びで返す。"""
+    if el["type"] == "way" and el.get("geometry"):
+        return [(g["lat"], g["lon"]) for g in el["geometry"]]
+    if el["type"] == "relation":
+        pts: list[tuple[float, float]] = []
+        for m in el.get("members", []):
+            if m.get("geometry"):
+                pts += [(g["lat"], g["lon"]) for g in m["geometry"]]
+        return pts or None
     return None
+
+
+def centre(el: dict) -> tuple[float, float] | None:
+    """代表点。面は重心を使う。
+
+    Overpass の out center は外接矩形の中心なので、L字や中庭のある建物だと
+    建物の外に落ちる。実際の輪郭から重心を出し、重心が輪郭の外に出る形
+    (コの字など) では輪郭の平均点に逃がす。
+    """
+    if el["type"] == "node":
+        return el["lat"], el["lon"]
+    ring = poly(el)
+    if not ring or len(ring) < 3:
+        return None
+    a = 0.0; cy = 0.0; cx = 0.0
+    for i in range(len(ring)):
+        y0, x0 = ring[i]; y1, x1 = ring[(i + 1) % len(ring)]
+        f = x0 * y1 - x1 * y0
+        a += f; cx += (x0 + x1) * f; cy += (y0 + y1) * f
+    if abs(a) < 1e-12:
+        return (sum(p[0] for p in ring) / len(ring),
+                sum(p[1] for p in ring) / len(ring))
+    c = (cy / (3 * a), cx / (3 * a))
+    if not point_in(c, ring):
+        return (sum(p[0] for p in ring) / len(ring),
+                sum(p[1] for p in ring) / len(ring))
+    return c
+
+
+def point_in(pt: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+    y, x = pt; ins = False; n = len(ring); j = n - 1
+    for i in range(n):
+        yi, xi = ring[i]; yj, xj = ring[j]
+        if ((yi > y) != (yj > y)) and \
+                (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi):
+            ins = not ins
+        j = i
+    return ins
+
+
+def span_m(el: dict) -> float:
+    """要素の大きさ (対角線の長さ)。同名の小さな注記より建物本体を選ぶため。"""
+    ring = poly(el)
+    if not ring:
+        return 0.0
+    lats = [p[0] for p in ring]; lngs = [p[1] for p in ring]
+    return metres((min(lats), min(lngs)), (max(lats), max(lngs)))
 
 
 def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -119,18 +170,18 @@ def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 def best(elements: list[dict], want: str, cur: tuple[float, float],
          station: bool) -> dict | None:
-    """名前が一致するもののうち、今の座標に一番近いものを選ぶ。
+    """名前が完全に一致するもののうち、一番大きいものを選ぶ。
 
-    同名の別施設 (系列店など) に飛ばないよう、距離も見る。
-    面 (way/relation) を点 (node) より優先する。建物そのものの重心が欲しいため。
+    今の座標が当てにならない (最大1km ずれている) ので、距離では選ばない。
+    同名が複数あるときは、注記や出入口ではなく施設本体を採るために
+    大きさで決める。候補が散らばっている場合は呼び出し側に知らせる。
     """
     cands = []
     for el in elements:
         tags = el.get("tags") or {}
         nm = tags.get("name", "")
-        if want not in nm:
+        if nm != want and not (nm.startswith(want + ";") or nm.startswith(want + "（")):
             continue
-        # 駅は駅そのものだけ。同名のバス停や出入口に引っ張られないようにする。
         if station and tags.get("railway") != "station":
             continue
         if not station and tags.get("railway") == "station":
@@ -138,18 +189,16 @@ def best(elements: list[dict], want: str, cur: tuple[float, float],
         p = centre(el)
         if not p:
             continue
-        d = metres(cur, p)
-        if d > 1200:                       # 1.2km 以上離れていたら別物とみなす
-            continue
-        rank = 0 if el["type"] in ("way", "relation") else 1
-        cands.append((rank, d, el, p))
+        cands.append({"p": p, "el": el, "span": span_m(el), "name": nm})
     if not cands:
         return None
-    cands.sort(key=lambda t: (t[0], t[1]))
-    r, d, el, p = cands[0]
-    return {"lat": round(p[0], 6), "lng": round(p[1], 6), "dist": d,
-            "osm": f"{el['type']}/{el['id']}",
-            "name": (el.get("tags") or {}).get("name", "")}
+    cands.sort(key=lambda c: -c["span"])
+    top = cands[0]
+    spread = max((metres(top["p"], c["p"]) for c in cands[1:]), default=0.0)
+    return {"lat": round(top["p"][0], 6), "lng": round(top["p"][1], 6),
+            "dist": metres(cur, top["p"]), "span": top["span"],
+            "n": len(cands), "spread": spread,
+            "osm": f"{top['el']['type']}/{top['el']['id']}", "name": top["name"]}
 
 
 def main() -> None:
@@ -177,8 +226,10 @@ def main() -> None:
     print("\n--- ずれの大きい順 ---", flush=True)
     rows = sorted(found.items(), key=lambda kv: -kv[1]["dist"])
     for sid, h in rows:
+        warn = "  ※同名が散在" if h["spread"] > 300 else ""
         print(f"{h['dist']:7.1f}m  {sid:22s} {SPOTS[sid]['name']}"
-              f"  → {h['lat']}, {h['lng']}  [{h['osm']} {h['name']}]", flush=True)
+              f"  → {h['lat']}, {h['lng']}  幅{h['span']:.0f}m 候補{h['n']}"
+              f"  [{h['osm']} {h['name']}]{warn}", flush=True)
     missing = sorted(set(targets) - set(found))
     if missing:
         print("\n見つからず (触らない): " + ", ".join(missing), flush=True)
