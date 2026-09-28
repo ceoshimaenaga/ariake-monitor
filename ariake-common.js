@@ -79,7 +79,8 @@
     threshold: 60,     // これ以上を「注意」として扱う混雑度
     onlyMine: false,   // 固定したものだけ表示する
     theme: "auto",     // auto / light / dark
-    design: "midnight" // 地図デザイン: midnight / paper / radar
+    design: "midnight", // 地図デザイン: midnight / paper / radar / flow
+    icons: "small"     // 建物イラスト: off / small / large
   };
 
   function read() {

@@ -39,6 +39,21 @@
     --map-rail:rgba(140,190,220,.16); --map-grid:rgba(90,200,220,.13);
     --map-ink:rgba(120,180,205,.65); --map-major-w:2; --map-grid-w:1.2; }
 
+  /* 人流。混雑を面ではなく「建物の中」と「道の上」に置く。
+   * 人がいない空き地や海を塗らないので、実際の人の居場所に近い。 */
+  :root[data-design="flow"] {
+    color-scheme:dark; --is-dark:1;
+    --plane:#07070a; --panel:#101016; --line:#1e1e27;
+    --text:#f2f2f7; --sec:#a8a8b8; --muted:#74748a; --accent:#7c6cf0;
+    --critical:#ff5d5d; --serious:#ff9a4d; --warning:#ffd23f; --good:#3fd98a;
+    --map-sea:#05050a; --map-land:#0b0b11; --map-park:#0c1410; --map-bldg:#14141d;
+    --map-bldg-edge:rgba(255,255,255,.045); --map-shore:rgba(120,120,170,.35);
+    --map-minor:rgba(255,255,255,.05); --map-major:rgba(255,255,255,.09);
+    --map-rail:rgba(255,255,255,.10); --map-grid:rgba(255,255,255,.035);
+    --map-ink:rgba(168,168,184,.5); --map-major-w:2; --map-grid-w:1;
+    --flow-1:#1e2442; --flow-2:#3b3a94; --flow-3:#8c3ba4;
+    --flow-4:#e35f37; --flow-5:#ffd873; }
+
   * { box-sizing:border-box; }
   body { margin:0; background:var(--plane); color:var(--text);
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
@@ -72,6 +87,7 @@
   .skins button.on { color:var(--text); border-color:var(--accent); }
   .skins i { width:22px; height:12px; border-radius:3px; display:block;
     border:1px solid rgba(128,128,128,.35); }
+  .skins .sep { width:1px; height:18px; background:var(--line); margin:0 2px; }
   .map .node .glow { cursor:pointer; }
   .map .node { position:absolute; transform:translate(-50%,-50%); text-align:center;
     cursor:default; width:0; height:0; }
@@ -96,6 +112,9 @@
   .map .cap b { font-variant-numeric:tabular-nums; }
   .map .node.mine .cap { color:var(--accent); font-weight:700; }
   .map .node.station .glow { border-radius:4px; }
+  :root[data-design="flow"] .map .glow { background:transparent !important;
+    border:2px solid rgba(255,255,255,.82); box-shadow:0 0 0 2px rgba(0,0,0,.55); }
+  :root[data-design="flow"] .map .node.mine .glow { border-color:var(--accent); }
   .legend { display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font-size:11px;
     margin-top:12px; align-items:center; }
   .legend b { width:12px; height:12px; border-radius:3px; display:inline-block;
@@ -176,6 +195,46 @@ A.setBase("dark");
  * 雨雲レーダーのように連続した分布に見えるが、実測の面ではない。
  * 元になった地点が分かるよう、点と名前は面の上に必ず重ねて表示する。 */
 var FIELD = { gw: 0, gh: 0, off: null };
+
+/* その場所の混雑度を、周りの地点から重み付き平均で出す。
+ * 戻り値の near は「一番近い地点がどれだけ効いているか」で、
+ * 地点から遠いところを描かないための判定に使う。 */
+function sampleAt(px, py, pts, inv) {
+  var num = 0, den = 0, near = 0;
+  for (var i = 0; i < pts.length; i++) {
+    var dx = px - pts[i].x, dy = py - pts[i].y;
+    var w = Math.exp(-(dx * dx + dy * dy) * inv);
+    num += w * pts[i].v; den += w;
+    if (w > near) near = w;
+  }
+  return { v: den > 1e-6 ? num / den : 0, near: near };
+}
+/* 人流での値の取り方。
+ * 加重平均 (sampleAt) だと、どの地点からも遠い建物にまで全体の平均が乗ってしまい、
+ * 地図いっぱいが同じ色になる。人流では「その場所に人を送り込んでいる地点」の
+ * 混雑度を距離で減衰させた値を使う。会場から離れるほど暗くなるので、
+ * 人がどこから湧いてどこまで届いているかが読める。 */
+function sampleDecay(px, py, pts, inv) {
+  var best = 0;
+  for (var i = 0; i < pts.length; i++) {
+    var dx = px - pts[i].x, dy = py - pts[i].y;
+    var v = pts[i].v * Math.exp(-(dx * dx + dy * dy) * inv);
+    if (v > best) best = v;
+  }
+  return best;
+}
+function screenPts(spots, h, W, H) {
+  return spots.map(function (s) {
+    return { x: s._x / 100 * W, y: s._y / 100 * H, v: s.series[h].score };
+  });
+}
+// にじみの広さ。画面の大きさではなく「地上の距離」で決める。
+// 混雑は地点から概ね 400m くらいまで連続しているとみなす、という仮定で、
+// 拡大しても縮小しても同じ広がりを表すようにしてある。
+function sigmaFor(W, H, box) {
+  return Math.max(38, Math.min(Math.min(W, H) * 0.34, box.mPx * 400));
+}
+
 function drawField(spots, h, box, byId) {
   var cv = document.getElementById("field");
   var map = document.getElementById("map");
@@ -188,6 +247,17 @@ function drawField(spots, h, box, byId) {
   ctx.clearRect(0, 0, W, H);
   drawBase(ctx, W, H, spots, box);
 
+  if (designMode() === "flow") drawFlow(ctx, W, H, spots, h, box);
+  else drawBands(ctx, W, H, spots, h, box);
+
+  drawRail(ctx, byId, box);
+  drawScale(ctx, W, H, box);
+}
+
+/* 面として描く (雨雲レーダー型)。
+ * 31地点の推定値しか無いので、地点間はガウス重み付き平均で補間している。
+ * 連続した分布に見えるが、実測の面ではない。 */
+function drawBands(ctx, W, H, spots, h, box) {
   var gw = 168, gh = Math.max(32, Math.round(168 * H / W));
   if (!FIELD.off || FIELD.gw !== gw || FIELD.gh !== gh) {
     FIELD.off = document.createElement("canvas");
@@ -196,32 +266,17 @@ function drawField(spots, h, box, byId) {
   }
   var octx = FIELD.off.getContext("2d");
   var img = octx.createImageData(gw, gh);
-  // にじみの広さ。画面の大きさではなく「地上の距離」で決める。
-  // 混雑は地点から概ね 400m くらいまで連続しているとみなす、という仮定で、
-  // 拡大しても縮小しても同じ広がりを表すようにしてある。
-  var sigma = Math.max(38, Math.min(Math.min(W, H) * 0.34, box.mPx * 400));
+  var sigma = sigmaFor(W, H, box);
   var inv = 1 / (2 * sigma * sigma);
-
-  // 各地点の画面座標と、その時刻のスコア
-  var pts = spots.map(function (s) {
-    return { x: s._x / 100 * W, y: s._y / 100 * H, v: s.series[h].score };
-  });
+  var pts = screenPts(spots, h, W, H);
 
   for (var gy = 0; gy < gh; gy++) {
     for (var gx = 0; gx < gw; gx++) {
-      var px = (gx + 0.5) / gw * W, py = (gy + 0.5) / gh * H;
-      var num = 0, den = 0, near = 0;
-      for (var i = 0; i < pts.length; i++) {
-        var dx = px - pts[i].x, dy = py - pts[i].y;
-        var w = Math.exp(-(dx * dx + dy * dy) * inv);
-        num += w * pts[i].v; den += w;
-        if (w > near) near = w;
-      }
-      var v = den > 1e-6 ? num / den : 0;
-      var rgb = hexToRgb(A.cellColor(v));
+      var r = sampleAt((gx + 0.5) / gw * W, (gy + 0.5) / gh * H, pts, inv);
+      var rgb = hexToRgb(A.cellColor(r.v));
       // 5段階の等値帯にする。連続的に薄くするより、天気レーダーのように
       // 「どこからが混むのか」の境目が読めるようにするため。
-      var alpha = BAND_ALPHA[A.rankOf(v) - 1] * Math.min(1, near * 4.5);
+      var alpha = BAND_ALPHA[A.rankOf(r.v) - 1] * Math.min(1, r.near * 4.5);
       var o = (gy * gw + gx) * 4;
       img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
       img.data[o + 3] = Math.round(alpha * 255);
@@ -231,9 +286,73 @@ function drawField(spots, h, box, byId) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(FIELD.off, 0, 0, gw, gh, 0, 0, W, H);
-  drawRail(ctx, byId, box);
-  drawScale(ctx, W, H, box);
 }
+
+/* 人流として描く。
+ * 人がいるのは建物の中と道の上で、空き地や海には居ない。
+ * なので面で一様に塗らず、OpenStreetMap の建物と道路にだけ色を置く。
+ * 塗る濃さは面と同じ推定値だが、「どこに人がいるか」の形は実際の
+ * 建物と道路の形になるので、面より実態に近い。 */
+var CENTROIDS = null;   // 建物の重心 (経度緯度)。基盤地図ごとに一度だけ計算する
+function centroids(b) {
+  if (CENTROIDS && CENTROIDS.src === b) return CENTROIDS.list;
+  var list = b.buildings.map(function (ring) {
+    var x = 0, y = 0;
+    for (var i = 0; i < ring.length; i++) { x += ring[i][0]; y += ring[i][1]; }
+    return [x / ring.length, y / ring.length];
+  });
+  CENTROIDS = { src: b, list: list };
+  return list;
+}
+function drawFlow(ctx, W, H, spots, h, box) {
+  var b = BASEMAP;
+  if (!b) { drawBands(ctx, W, H, spots, h, box); return; }
+  var sigma = sigmaFor(W, H, box);
+  var inv = 1 / (2 * sigma * sigma);
+  var pts = screenPts(spots, h, W, H);
+  var cs = centroids(b);
+
+  // 建物。人の「滞在」を表すので、面で塗る。
+  ctx.save();
+  for (var i = 0; i < b.buildings.length; i++) {
+    var ring = b.buildings[i];
+    if (!visible(ring, box, .05)) continue;
+    var c = box.px(cs[i][0], cs[i][1]);
+    if (c[0] < -40 || c[0] > W + 40 || c[1] < -40 || c[1] > H + 40) continue;
+    var v = sampleDecay(c[0], c[1], pts, inv);
+    if (v < 2) continue;                        // 人の気配が無い建物は塗らない
+    ctx.globalAlpha = FLOW_ALPHA[A.rankOf(v) - 1];
+    ctx.fillStyle = flowColor(v);
+    ctx.beginPath(); ringPath(ctx, ring, box); ctx.fill();
+  }
+  ctx.restore();
+
+  // 道路。人と車の「流れ」を表すので、線の太さと明るさで出す。
+  ctx.save();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  [["roads_minor", 1.6], ["roads_major", 3.4]].forEach(function (kind) {
+    var ways = b[kind[0]], base = kind[1];
+    for (var j = 0; j < ways.length; j++) {
+      var w = ways[j];
+      if (!visible(w, box, .05)) continue;
+      // 区間ごとに評価する。1本の道でも、混んでいる所と空いている所があるため。
+      for (var k = 0; k < w.length - 1; k++) {
+        var p0 = box.px(w[k][0], w[k][1]), p1 = box.px(w[k + 1][0], w[k + 1][1]);
+        var mx = (p0[0] + p1[0]) / 2, my = (p0[1] + p1[1]) / 2;
+        if (mx < -40 || mx > W + 40 || my < -40 || my > H + 40) continue;
+        var v2 = sampleDecay(mx, my, pts, inv);
+        if (v2 < 2) continue;
+        ctx.globalAlpha = FLOW_ALPHA[A.rankOf(v2) - 1];
+        ctx.strokeStyle = flowColor(v2);
+        // 混んでいる区間ほど太い。流れの量を線の太さで出す。
+        ctx.lineWidth = base * (0.55 + A.rankOf(v2) * 0.32);
+        ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+      }
+    }
+  });
+  ctx.restore();
+}
+
 // 等値帯の濃さ (すいている→非常に混雑)。
 // 「すいている」は透明にして、混んでいる所だけが地図の上に浮かぶようにする。
 var BAND_ALPHA = [0.00, 0.16, 0.32, 0.50, 0.70];
@@ -280,6 +399,14 @@ function cssVar(name, fallback) {
   } catch (e) { /* 取得できない環境では既定値 */ }
   return fallback;
 }
+/* 人流の色。混雑度の段ごとに決め打ちで、明度が単調に上がるようにしてある。
+ * 建物と道という細い形に置くので、面のときより色差を強くしないと読めない。 */
+function flowColor(score) {
+  return cssVar("--flow-" + A.rankOf(score), A.cellColor(score));
+}
+// 人流のときの濃さ。空いている所は思い切り沈め、混んでいる所だけを浮かせる。
+var FLOW_ALPHA = [0.22, 0.40, 0.62, 0.85, 1.00];
+
 function paletteBase() {
   return {
     sea: cssVar("--map-sea", "#101a1e"),
@@ -302,8 +429,25 @@ function paletteBase() {
 var DESIGNS = [
   { id: "midnight", name: "夜のベイ", sw: ["#161615", "#101a1e", "#3987e5"] },
   { id: "paper",    name: "紙の地図", sw: ["#f8f4e9", "#dcdfd8", "#b4561f"] },
-  { id: "radar",    name: "レーダー", sw: ["#0d1420", "#050a0f", "#35d0e0"] }
+  { id: "radar",    name: "レーダー", sw: ["#0d1420", "#050a0f", "#35d0e0"] },
+  // 人流だけは描き方が違う。色ではなく「どこを塗るか」が変わる。
+  { id: "flow",     name: "人流",     sw: ["#0b0b11", "#7c6cf0", "#ffd23f"], mode: "flow" }
 ];
+var ICON_SIZES = [
+  { id: "off",   name: "なし", px: 0 },
+  { id: "small", name: "小",   px: 40 },
+  { id: "large", name: "大",   px: 72 }
+];
+function iconSize() {
+  var v = A.personal.icons;
+  for (var i = 0; i < ICON_SIZES.length; i++) if (ICON_SIZES[i].id === v) return ICON_SIZES[i];
+  return ICON_SIZES[1];
+}
+function designMode() {
+  for (var i = 0; i < DESIGNS.length; i++)
+    if (DESIGNS[i].id === currentDesign()) return DESIGNS[i].mode || "field";
+  return "field";
+}
 function currentDesign() {
   var d = A.personal.design;
   return DESIGNS.some(function (x) { return x.id === d; }) ? d : "midnight";
@@ -319,12 +463,22 @@ function mountSkins() {
       'aria-pressed="' + (d.id === cur) + '" title="' + d.name + '">' + bar +
       '<b style="font-weight:600">' + d.name + '</b></button>';
   }).join("");
-  el.querySelectorAll("button").forEach(function (b) {
+  // 建物イラストの大きさ。邪魔なときは「なし」にできる。
+  var cs = iconSize().id;
+  el.innerHTML += '<span class="sep"></span><span>イラスト</span>' +
+    ICON_SIZES.map(function (z) {
+      return '<button class="' + (z.id === cs ? "on" : "") + '" data-z="' + z.id + '" ' +
+        'aria-pressed="' + (z.id === cs) + '">' + z.name + '</button>';
+    }).join("");
+  el.querySelectorAll("button[data-d]").forEach(function (b) {
     b.onclick = function () {
       // テーマも一緒に合わせておく。他のページを開いたときに明暗がちぐはぐに
       // ならないようにするため。
       A.setPersonal({ design: b.dataset.d, theme: b.dataset.d === "paper" ? "light" : "dark" });
     };
+  });
+  el.querySelectorAll("button[data-z]").forEach(function (b) {
+    b.onclick = function () { A.setPersonal({ icons: b.dataset.z }); };
   });
 }
 
@@ -605,9 +759,11 @@ function draw() {
     var v = s.series[hour], sc = v.score;
     var x = s._x, y = s._y;
     var mine = s.id === p.home || p.pinned.indexOf(s.id) >= 0;
-    var icon = (area !== "all") && ICONS[s.id];     // 拡大したときだけイラストにする
+    var zoom = iconSize();
+    // イラストは拡大したときだけ。「なし」なら常に丸印。
+    var icon = (area !== "all") && zoom.px > 0 && ICONS[s.id];
     var dia = 13 + Math.round(sc / 100 * 27);
-    var bs = 72, ring = 30 + Math.round(sc / 100 * 34);
+    var bs = zoom.px, ring = 30 + Math.round(sc / 100 * 34);
     var half = icon ? Math.max(bs, ring) / 2 : dia / 2;
     var n = document.createElement("div");
     n.className = "node " + s.kind + (mine ? " mine" : "");
@@ -634,13 +790,17 @@ function draw() {
   });
   declutter(map);
 
+  var swatch = designMode() === "flow" ? flowColor : A.rampColor;
   document.getElementById("legend").innerHTML = A.LEVELS.map(function (l) {
-    return '<span><b style="background:' + A.rampColor(l.max - 1) + '"></b>' + l.label + '</span>';
+    return '<span><b style="background:' + swatch(l.max - 1) + '"></b>' + l.label + '</span>';
   }).join("") + '<span>丸の大きさ＝混雑度。四角は駅。' +
   (area === "all" ? '名前は混雑上位と固定した場所のみ。' : '名前が入りきらない場所は省いています。') +
   'カーソルを当てると詳細が出ます。</span>' +
   '<span>破線＝ゆりかもめ（監視している駅を結んだ区間）。左下は距離、右上は方位。</span>' +
-  '<span>下地の海岸線・運河・建物・道路は OpenStreetMap の実データです。</span>';
+  '<span>下地の海岸線・運河・建物・道路は OpenStreetMap の実データです。</span>' +
+  (designMode() === "flow"
+    ? '<span>色が付いているのは建物と道路だけです。太い線ほど流れが混んでいます。</span>'
+    : '');
 
   document.getElementById("rankttl").textContent =
     "この時間の混雑順" + (def.ids ? "（" + def.name + "）" : "");
@@ -658,9 +818,13 @@ function draw() {
         '</td></tr>';
     }).join("");
 
-  document.getElementById("note").textContent =
-    "面の濃淡は " + spots.length + " 地点の推定値を地点間で補間して描いたものです。" +
-    "実測した面ではないため、地点から離れた場所ほど薄く表示しています。" +
+  document.getElementById("note").textContent = (designMode() === "flow"
+    ? "人がいるのは建物の中と道の上なので、空き地や水面は塗らず、" +
+      "OpenStreetMap の建物と道路にだけ色を置いています。" +
+      "濃さは " + spots.length + " 地点の推定値をその建物・その区間の位置で評価したものです。" +
+      "「どこに人がいるか」の形は実際の建物と道路の形ですが、混み具合そのものは推定値です。"
+    : "面の濃淡は " + spots.length + " 地点の推定値を地点間で補間して描いたものです。" +
+      "実測した面ではないため、地点から離れた場所ほど薄く表示しています。") +
     "元になった地点は丸で重ねています。" +
     (area === "all" ? "丸をクリックするとそのエリアを拡大します。" : "");
   document.getElementById("foot").innerHTML =
