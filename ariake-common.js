@@ -80,7 +80,9 @@
     onlyMine: false,   // 固定したものだけ表示する
     theme: "auto",     // auto / light / dark
     design: "midnight", // 地図デザイン: midnight / paper / radar / flow
-    icons: "small"     // 建物イラスト: off / small / large
+    icons: "small",    // 建物イラスト: off / small / large
+    area: "all",       // 最後に見ていたエリア
+    view: null         // 最後に見ていた地図の位置と縮尺 {lng, lat, mPx}
   };
 
   function read() {

@@ -70,6 +70,14 @@
   .map { position:relative; height:520px; margin:16px 0 0; border-radius:16px;
     background:var(--panel); border:1px solid var(--line); overflow:hidden; }
   .map canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .map { touch-action:none; cursor:grab; }
+  .map.grabbing { cursor:grabbing; }
+  .zoomer { position:absolute; right:12px; bottom:12px; display:flex; flex-direction:column;
+    gap:6px; z-index:3; }
+  .zoomer button { width:34px; height:34px; border-radius:9px; cursor:pointer;
+    border:1px solid var(--line); background:color-mix(in srgb, var(--panel) 90%, transparent);
+    color:var(--text); font-size:15px; line-height:1; font-weight:600; }
+  .zoomer button.wide { width:34px; font-size:10px; font-weight:600; }
   .scrub .play { min-width:88px; font-weight:700; }
   .scrub .play[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
   .note { color:var(--muted); font-size:11px; margin-top:8px; line-height:1.7; }
@@ -141,7 +149,13 @@
     <div class="areas" id="areas"></div>
     <div class="skins" id="skins"></div>
   </div>
-  <div class="map" id="map"><canvas id="field"></canvas></div>
+  <div class="map" id="map"><canvas id="field"></canvas>
+    <div class="zoomer">
+      <button id="zin" title="拡大" aria-label="拡大">＋</button>
+      <button id="zout" title="縮小" aria-label="縮小">−</button>
+      <button id="zfit" class="wide" title="表示中のエリア全体に戻す" aria-label="全体に戻す">全体</button>
+    </div>
+  </div>
   <div class="legend" id="legend"></div>
   <p class="note" id="note"></p>
   <h2 id="rankttl">この時間の混雑順</h2>
@@ -150,7 +164,13 @@
 </div>
 <script src="../ariake-common.js"></script><script src="../ariake-settings.js"></script>
 <script>
-var A = Ariake, hour = 0, timer = null, playing = false, area = "all";
+var A = Ariake, hour = 0, timer = null, playing = false;
+var area = A.personal.area || "all";
+/* 地図の見え方。VIEW があればそれを使い、無ければ表示中のエリアに自動で合わせる。
+ * 動かすたびに端末内へ保存するので、次に開いたときも同じ場所が出る。 */
+var VIEW = A.personal.view || null;
+var BOX = null, FIT = null;      // 直近の投影と、自動フィットしたときの値
+var MIN_MPX = 0.02, MAX_MPX = 4; // 縮尺の上下限 (約 50m/px 〜 25cm/px)
 
 /* エリア。選ぶとその範囲だけを描くので、実質的な拡大図になる。
  * 面の補間もそのエリアの地点だけで行うため、拡大しても意味が変わらない。 */
@@ -641,6 +661,104 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/* 動かしている間は保存しない。指を離してから少し待ってまとめて書く。 */
+var saveTimer = null;
+function saveView() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(function () {
+    A.setPersonal({ view: VIEW, area: area });
+  }, 400);
+}
+function clampView() {
+  if (!VIEW) return;
+  VIEW.mPx = Math.max(MIN_MPX, Math.min(MAX_MPX, VIEW.mPx));
+  // 有明から遠く離れて迷子にならないよう、データのある範囲の近くに留める
+  if (FIT) {
+    var slack = 0.03;
+    VIEW.lng = Math.max(FIT.lng - slack, Math.min(FIT.lng + slack, VIEW.lng));
+    VIEW.lat = Math.max(FIT.lat - slack, Math.min(FIT.lat + slack, VIEW.lat));
+  }
+}
+/* 画面上の一点を固定したまま拡大縮小する。
+ * その点の緯度経度が動かないように中心をずらすので、
+ * カーソルや指の下にあるものが逃げない。 */
+function zoomAt(x, y, factor) {
+  if (!BOX) return;
+  var anchor = BOX.at(x, y);
+  if (!VIEW) VIEW = { lng: FIT.lng, lat: FIT.lat, mPx: FIT.mPx };
+  var before = VIEW.mPx;
+  VIEW.mPx = Math.max(MIN_MPX, Math.min(MAX_MPX, VIEW.mPx * factor));
+  var k = before / VIEW.mPx;      // 実際に変わった倍率 (上下限で頭打ちになることがある)
+  VIEW.lng = anchor[0] + (VIEW.lng - anchor[0]) * k;
+  VIEW.lat = anchor[1] + (VIEW.lat - anchor[1]) * k;
+  clampView(); draw(); saveView();
+}
+function resetView() { VIEW = null; draw(); saveView(); }
+
+var mapBound = false;
+function bindMap() {
+  if (mapBound) return;
+  mapBound = true;
+  var el = document.getElementById("map");
+  var drag = null, pinch = null;
+
+  el.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var r = el.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, Math.pow(0.9988, e.deltaY));
+  }, { passive: false });
+
+  el.addEventListener("pointerdown", function (e) {
+    if (e.target.closest(".cap")) return;       // ラベルは選択できるままにする
+    el.setPointerCapture(e.pointerId);
+    if (!drag) drag = {};
+    drag[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(drag);
+    if (ids.length === 2) {
+      var a = drag[ids[0]], b = drag[ids[1]];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) };
+    }
+    el.classList.add("grabbing");
+  });
+
+  el.addEventListener("pointermove", function (e) {
+    if (!drag || !drag[e.pointerId] || !BOX) return;
+    var ids = Object.keys(drag);
+    if (ids.length >= 2 && pinch) {
+      drag[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var a = drag[ids[0]], b = drag[ids[1]];
+      var d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch.d > 4 && d > 4) {
+        var r = el.getBoundingClientRect();
+        zoomAt((a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, d / pinch.d);
+      }
+      pinch.d = d;
+      return;
+    }
+    var prev = drag[e.pointerId];
+    var dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    if (!dx && !dy) return;
+    drag[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (!VIEW) VIEW = { lng: FIT.lng, lat: FIT.lat, mPx: FIT.mPx };
+    var s0 = BOX.at(0, 0), s1 = BOX.at(dx, dy);
+    VIEW.lng -= (s1[0] - s0[0]); VIEW.lat -= (s1[1] - s0[1]);
+    clampView(); draw(); saveView();
+  });
+
+  function end(e) {
+    if (!drag) return;
+    delete drag[e.pointerId];
+    if (!Object.keys(drag).length) { drag = null; pinch = null; el.classList.remove("grabbing"); }
+    else if (Object.keys(drag).length < 2) pinch = null;
+  }
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+  el.addEventListener("dblclick", function (e) {
+    var r = el.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, 1.8);
+  });
+}
+
 function setHour(h) {
   hour = h;
   document.getElementById("slider").value = h;
@@ -668,6 +786,12 @@ A.load("../ariake.json").then(function (d) {
   sl.oninput = function () { stop(); hour = +sl.value; draw(); };
   document.getElementById("nowbtn").onclick = function () { stop(); setHour(0); };
   document.getElementById("play").onclick = function () { playing ? stop() : play(); };
+  bindMap();
+  var mid = function () { var m = document.getElementById("map");
+    return [m.clientWidth / 2, m.clientHeight / 2]; };
+  document.getElementById("zin").onclick = function () { var c = mid(); zoomAt(c[0], c[1], 1.6); };
+  document.getElementById("zout").onclick = function () { var c = mid(); zoomAt(c[0], c[1], 1 / 1.6); };
+  document.getElementById("zfit").onclick = resetView;
   addEventListener("resize", function () { draw(); });
   document.addEventListener("ariake:personal", draw);
   draw();
@@ -689,7 +813,7 @@ function draw() {
       a.name + '</button>';
   }).join("");
   document.getElementById("areas").querySelectorAll("button").forEach(function (btn) {
-    btn.onclick = function () { area = btn.dataset.a; draw(); };
+    btn.onclick = function () { area = btn.dataset.a; VIEW = null; draw(); saveView(); };
   });
   mountSkins();
   var lats = spots.map(function (s) { return s.lat; }),
@@ -701,19 +825,24 @@ function draw() {
   // 表示範囲の縦横比に合わせて地図の高さを決める。
   // 固定の高さだと、横長のエリアでは上下に、縦長のエリアでは左右に
   // 大きな余白ができて地形が小さくなってしまうため。
-  var kx0 = Math.cos((minLa + maxLa) / 2 * Math.PI / 180);
+  var fitLa = (minLa + maxLa) / 2, fitLo = (minLo + maxLo) / 2;
+  var kx0 = Math.cos(fitLa * Math.PI / 180);
   var ratio = Math.max(maxLa - minLa, 1e-4) / (Math.max(maxLo - minLo, 1e-4) * kx0);
   var MH = Math.round(Math.max(380, Math.min(660, MW * ratio * 0.92)));
   mapEl.style.height = MH + "px";
+
   // 緯度経度 → 画面座標。北が上。
-  // 縦横で別々に引き伸ばすと地形が歪むので、経度は cos(緯度) で補正した上で
-  // 縦横同じ倍率を使い、足りない方向は余白にしている (地図として正しい形を保つ)。
+  // 経度は cos(緯度) で補正した上で縦横同じ倍率を使い、足りない方向は
+  // 余白にしている (地図として正しい形を保つため)。
   var padPx = 62;
-  var midLa = (minLa + maxLa) / 2, midLo = (minLo + maxLo) / 2;
-  var kx = kx0;
-  var spanLo = Math.max(maxLo - minLo, 1e-4) * kx;
+  var spanLo = Math.max(maxLo - minLo, 1e-4) * kx0;
   var spanLa = Math.max(maxLa - minLa, 1e-4);
-  var scale = Math.min((MW - padPx * 2) / spanLo, (MH - padPx * 2) / spanLa);
+  var fitScale = Math.min((MW - padPx * 2) / spanLo, (MH - padPx * 2) / spanLa);
+  // 手で動かしていればその位置と縮尺、そうでなければ自動フィット。
+  var scale = VIEW ? VIEW.mPx * 111320 : fitScale;
+  var midLa = VIEW ? VIEW.lat : fitLa;
+  var midLo = VIEW ? VIEW.lng : fitLo;
+  var kx = Math.cos(midLa * Math.PI / 180);
   var box = {
     minLa: midLa - (MH / 2) / scale, maxLa: midLa + (MH / 2) / scale,
     minLo: midLo - (MW / 2) / scale / kx, maxLo: midLo + (MW / 2) / scale / kx,
@@ -725,9 +854,15 @@ function draw() {
       var q = box.px(lng, lat);
       return [q[0] / MW * 100, q[1] / MH * 100];
     },
+    // 画面座標 → 緯度経度 (ドラッグやホイールで使う)
+    at: function (x, y) {
+      return [midLo + (x - MW / 2) / scale / kx, midLa - (y - MH / 2) / scale];
+    },
     // 地上 1m あたりの画面ピクセル数 (緯度1度 ≒ 111,320m)
     mPx: scale / 111320
   };
+  BOX = box;
+  FIT = { lng: fitLo, lat: fitLa, mPx: fitScale / 111320 };
   var byId = {};
   spots.forEach(function (x) { byId[x.id] = x; });
 
@@ -736,6 +871,9 @@ function draw() {
     s._x = c[0]; s._y = c[1];
   });
 
+  // イラストやラベルを出すかどうかは、エリアの選択ではなく実際の縮尺で決める。
+  // 手で拡大したときにも同じように振る舞わせるため。(0.3 px/m ≒ 3.3m/px)
+  var close = box.mPx > 0.3;
   var slot = spots[0].series[hour].slot;
   document.getElementById("lbl").textContent = A.when(slot) +
     (hour ? "（" + hour + "時間後）" : "（いま）");
@@ -747,7 +885,7 @@ function draw() {
   // 「自分で固定した場所」と「その時間の混雑上位5件」だけにする。
   var named = {};
   // 拡大しているときは地点が少ないので全部に名前を出せる
-  var topN = (area === "all") ? 5 : spots.length;
+  var topN = close ? spots.length : 5;
   spots.slice().sort(function (a, b) {
     return b.series[hour].score - a.series[hour].score;
   }).slice(0, topN).forEach(function (s) { named[s.id] = true; });
@@ -761,7 +899,7 @@ function draw() {
     var mine = s.id === p.home || p.pinned.indexOf(s.id) >= 0;
     var zoom = iconSize();
     // イラストは拡大したときだけ。「なし」なら常に丸印。
-    var icon = (area !== "all") && zoom.px > 0 && ICONS[s.id];
+    var icon = close && zoom.px > 0 && ICONS[s.id];
     var dia = 13 + Math.round(sc / 100 * 27);
     var bs = zoom.px, ring = 30 + Math.round(sc / 100 * 34);
     var half = icon ? Math.max(bs, ring) / 2 : dia / 2;
@@ -779,11 +917,13 @@ function draw() {
           Math.round(sc) + '</b></div>' : '');
     n.title = s.name + " " + A.when(slot) + " 混雑度" + Math.round(sc) + "・" +
       A.levelOf(sc).label + (A.mainCause(v.factors) ? "\n" + A.mainCause(v.factors) : "") +
-      (area === "all" ? "\nクリックでこのエリアを拡大" : "");
-    if (area === "all") {
+      (close ? "" : "\nクリックでこのエリアを拡大");
+    if (!close) {
       var to = areaOf(s.id);
       var hit = n.querySelector(".glow");
-      if (to !== "all" && hit) hit.onclick = function () { area = to; draw(); };
+      if (to !== "all" && hit) hit.onclick = function () {
+        area = to; VIEW = null; draw(); saveView();
+      };
     }
     n.dataset.pri = (mine ? 1000 : 0) + sc;
     map.appendChild(n);
@@ -794,7 +934,7 @@ function draw() {
   document.getElementById("legend").innerHTML = A.LEVELS.map(function (l) {
     return '<span><b style="background:' + swatch(l.max - 1) + '"></b>' + l.label + '</span>';
   }).join("") + '<span>丸の大きさ＝混雑度。四角は駅。' +
-  (area === "all" ? '名前は混雑上位と固定した場所のみ。' : '名前が入りきらない場所は省いています。') +
+  (close ? '名前が入りきらない場所は省いています。' : '名前は混雑上位と固定した場所のみ。') +
   'カーソルを当てると詳細が出ます。</span>' +
   '<span>破線＝ゆりかもめ（監視している駅を結んだ区間）。左下は距離、右上は方位。</span>' +
   '<span>下地の海岸線・運河・建物・道路は OpenStreetMap の実データです。</span>' +
@@ -826,7 +966,9 @@ function draw() {
     : "面の濃淡は " + spots.length + " 地点の推定値を地点間で補間して描いたものです。" +
       "実測した面ではないため、地点から離れた場所ほど薄く表示しています。") +
     "元になった地点は丸で重ねています。" +
-    (area === "all" ? "丸をクリックするとそのエリアを拡大します。" : "");
+    (close ? "" : "丸をクリックするとそのエリアを拡大します。") +
+    "地図はドラッグで移動、ホイールかピンチ、＋−ボタンで拡大縮小できます。" +
+    "最後に見ていた位置と大きさは端末に覚えます。";
   document.getElementById("foot").innerHTML =
     (d.attribution || []).join(" ／ ") +
     '<br>地形・建物・道路・鉄道: © <a href="https://www.openstreetmap.org/copyright" ' +
