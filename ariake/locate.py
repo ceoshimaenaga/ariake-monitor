@@ -192,13 +192,58 @@ def best(elements: list[dict], want: str, cur: tuple[float, float],
         cands.append({"p": p, "el": el, "span": span_m(el), "name": nm})
     if not cands:
         return None
-    cands.sort(key=lambda c: -c["span"])
+    # 面 (way/relation) を点 (node) より優先し、その中で大きいものを採る。
+    # 同名の点は案内板や出入口であることが多く、施設本体ではないため。
+    cands.sort(key=lambda c: (0 if c["el"]["type"] in ("way", "relation") else 1,
+                              -c["span"]))
     top = cands[0]
     spread = max((metres(top["p"], c["p"]) for c in cands[1:]), default=0.0)
-    return {"lat": round(top["p"][0], 6), "lng": round(top["p"][1], 6),
+    return {"ring": poly(top["el"]), "type": top["el"]["type"],
+            "lat": round(top["p"][0], 6), "lng": round(top["p"][1], 6),
             "dist": metres(cur, top["p"]), "span": top["span"],
             "n": len(cands), "spread": spread,
             "osm": f"{top['el']['type']}/{top['el']['id']}", "name": top["name"]}
+
+
+def load_basemap() -> dict | None:
+    f = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "designs", "basemap.json")
+    try:
+        return json.load(open(f, encoding="utf-8"))
+    except Exception:                                 # noqa: BLE001
+        return None
+
+
+def ring_area_m2(ring: list[tuple[float, float]]) -> float:
+    import math
+    la = sum(p[0] for p in ring) / len(ring)
+    k = 111320 * math.cos(math.radians(la))
+    a = 0.0
+    for i in range(len(ring)):
+        y0, x0 = ring[i]; y1, x1 = ring[(i + 1) % len(ring)]
+        a += (x0 * k) * (y1 * 111320) - (x1 * k) * (y0 * 111320)
+    return abs(a) / 2
+
+
+def verify(hit: dict, base: dict | None) -> str:
+    """その点が実際の建物や公園の上に乗っているかを確かめる。
+
+    名前が合っているだけでは、案内板や別棟を掴んでいることがある。
+    手元に持っている OpenStreetMap の輪郭に当てて、建物か公園の中に
+    入っているものだけを信用する。入っていないものは動かさない。
+    """
+    if not base:
+        return "?"
+    pt = (hit["lat"], hit["lng"])
+    for ring in base["buildings"]:
+        r = [(q[1], q[0]) for q in ring]
+        if point_in(pt, r):
+            return f"建物{ring_area_m2(r):.0f}m2"
+    for ring in base["parks"]:
+        r = [(q[1], q[0]) for q in ring]
+        if point_in(pt, r):
+            return "公園"
+    return "なし"
 
 
 def main() -> None:
@@ -216,11 +261,13 @@ def main() -> None:
     els = fetch(query()).get("elements", [])
     print(f"  名前付き要素 {len(els)} 件", flush=True)
 
+    base = load_basemap()
     found: dict[str, dict] = {}
     for sid, want in targets.items():
         cur = (SPOTS[sid]["lat"], SPOTS[sid]["lng"])
         hit = best(els, want, cur, sid.startswith("st_"))
         if hit:
+            hit["on"] = verify(hit, base)
             found[sid] = hit
 
     print("\n--- ずれの大きい順 ---", flush=True)
@@ -229,7 +276,7 @@ def main() -> None:
         warn = "  ※同名が散在" if h["spread"] > 300 else ""
         print(f"{h['dist']:7.1f}m  {sid:22s} {SPOTS[sid]['name']}"
               f"  → {h['lat']}, {h['lng']}  幅{h['span']:.0f}m 候補{h['n']}"
-              f"  [{h['osm']} {h['name']}]{warn}", flush=True)
+              f"  乗っている物:{h['on']}  [{h['osm']} {h['name']}]{warn}", flush=True)
     missing = sorted(set(targets) - set(found))
     if missing:
         print("\n見つからず (触らない): " + ", ".join(missing), flush=True)
@@ -239,8 +286,14 @@ def main() -> None:
 
     src = open(CONFIG, encoding="utf-8").read()
     changed = 0
+    skipped = []
     for sid, h in found.items():
         if h["dist"] < 5:                   # 5m 未満は誤差なので触らない
+            continue
+        # 建物にも公園にも乗っていない点は信用しない。名前だけ合っている
+        # 案内板や別棟を掴んでいる可能性があるため、そのまま残す。
+        if h["on"] == "なし":
+            skipped.append(sid)
             continue
         # そのスポットの定義ブロックの中だけを書き換える
         m = re.search(r'("' + re.escape(sid) + r'":\s*\{)(.*?)(\n    \},)', src, re.S)
@@ -255,6 +308,8 @@ def main() -> None:
             changed += 1
     open(CONFIG, "w", encoding="utf-8").write(src)
     print(f"\nconfig.py を更新: {changed} 件", flush=True)
+    if skipped:
+        print("建物にも公園にも乗らないので見送り: " + ", ".join(skipped), flush=True)
 
 
 if __name__ == "__main__":
