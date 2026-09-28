@@ -1,0 +1,48 @@
+name: locate
+
+# 各スポットの実際の位置を OpenStreetMap から取り、config.py の座標を直す。
+# 手入力の座標は4桁しかなく、地図を拡大すると建物とマーカーがずれるため。
+
+on:
+  workflow_dispatch:
+    inputs:
+      patch:
+        description: "config.py を書き換えてコミットする"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Locate
+        env:
+          PATCH: ${{ inputs.patch }}
+        run: |
+          if [ "$PATCH" = "true" ]; then
+            python ariake/locate.py --patch
+          else
+            python ariake/locate.py
+          fi
+
+      - name: Commit config.py
+        if: ${{ inputs.patch }}
+        run: |
+          git config user.name "ariake-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ariake/config.py
+          if git diff --staged --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "fix(ariake): スポットの座標を OpenStreetMap の実測値に合わせる"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi
