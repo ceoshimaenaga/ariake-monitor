@@ -16,25 +16,25 @@ from __future__ import annotations
 SPOTS: dict[str, dict] = {
     # ---- イベント会場 -----------------------------------------------------
     "bigsight": {
-        "name": "東京ビッグサイト", "kind": "venue", "lat": 35.6298, "lng": 139.7950,
+        "name": "東京ビッグサイト", "kind": "venue", "lat": 35.629794, "lng": 139.7941,
         "capacity": 120000, "scale": 30000, "default_attendance": 15000,
         "place_query": "東京ビッグサイト 東京国際展示場",
         "place_address": "東京都江東区有明3-11-1",
     },
     "ariake_arena": {
-        "name": "有明アリーナ", "kind": "venue", "lat": 35.6383, "lng": 139.7936,
+        "name": "有明アリーナ", "kind": "venue", "lat": 35.643423, "lng": 139.794382,
         "capacity": 15000, "scale": 6000, "default_attendance": 10000,
         "place_query": "有明アリーナ",
         "place_address": "東京都江東区有明1-11-1",
     },
     "ariake_coliseum": {
-        "name": "有明コロシアム", "kind": "venue", "lat": 35.6329, "lng": 139.7996,
+        "name": "有明コロシアム", "kind": "venue", "lat": 35.636468, "lng": 139.790089,
         "capacity": 10000, "scale": 5000, "default_attendance": 4000,
         "place_query": "有明コロシアム",
         "place_address": "東京都江東区有明2-2-22",
     },
     "garden_theater": {
-        "name": "東京ガーデンシアター", "kind": "venue", "lat": 35.6348, "lng": 139.7930,
+        "name": "東京ガーデンシアター", "kind": "venue", "lat": 35.637732, "lng": 139.792032,
         "capacity": 8000, "scale": 4000, "default_attendance": 6000,
         "place_query": "東京ガーデンシアター",
         "place_address": "東京都江東区有明1-1-10",
@@ -51,19 +51,19 @@ SPOTS: dict[str, dict] = {
     },
     # ---- 周辺施設 ---------------------------------------------------------
     "ariake_garden": {
-        "name": "有明ガーデン", "kind": "facility", "lat": 35.6353, "lng": 139.7917,
+        "name": "有明ガーデン", "kind": "facility", "lat": 35.638418, "lng": 139.79307,
         "capacity": 40000, "scale": 9000, "default_attendance": 6000,
         "place_query": "有明ガーデン",
         "place_address": "東京都江東区有明2-1-8",
     },
     "ariake_tennis_forest": {
-        "name": "有明テニスの森公園", "kind": "facility", "lat": 35.6330, "lng": 139.7986,
+        "name": "有明テニスの森公園", "kind": "facility", "lat": 35.635318, "lng": 139.788203,
         "capacity": 8000, "scale": 4000, "baseline_scale": 0.35,
         "place_query": "有明テニスの森公園",
         "place_address": "東京都江東区有明2-2-22",
     },
     "toyosu_market": {
-        "name": "豊洲市場・千客万来", "kind": "facility", "lat": 35.6455, "lng": 139.7867,
+        "name": "豊洲市場・千客万来", "kind": "facility", "lat": 35.645458, "lng": 139.783657,
         "capacity": 30000, "scale": 7000, "baseline_scale": 0.85,
         "place_query": "豊洲市場 千客万来",
         "place_address": "東京都江東区豊洲6-5-1",
@@ -77,20 +77,20 @@ SPOTS: dict[str, dict] = {
     # ---- 追加: 有明・東雲の生活/レジャー施設 -------------------------------
     "aeon_ariake": {
         "name": "イオンスタイル有明ガーデン", "kind": "facility",
-        "lat": 35.6353, "lng": 139.7912, "capacity": 12000, "scale": 4000,
+        "lat": 35.638418, "lng": 139.79307, "capacity": 12000, "scale": 4000,
         "place_query": "イオンスタイル有明ガーデン",
         "place_address": "東京都江東区有明2-1-8",
     },
     "izumi_spa": {
         "name": "泉天空の湯 有明ガーデン", "kind": "facility",
-        "lat": 35.6349, "lng": 139.7913, "capacity": 2000, "scale": 1200,
+        "lat": 35.638418, "lng": 139.79307, "capacity": 2000, "scale": 1200,
         "baseline_scale": 0.7, "spillover_scale": 0.4,
         "place_query": "泉天空の湯 有明ガーデン",
         "place_address": "東京都江東区有明2-1-7",
     },
     "ganken_ariake": {
         "name": "がん研有明病院", "kind": "facility",
-        "lat": 35.6345, "lng": 139.7880, "capacity": 6000, "scale": 2500,
+        "lat": 35.634059, "lng": 139.794921, "capacity": 6000, "scale": 2500,
         "baseline_scale": 0.8, "spillover_scale": 0.15,
         "place_query": "がん研有明病院",
         "place_address": "東京都江東区有明3-8-31",
@@ -104,14 +104,14 @@ SPOTS: dict[str, dict] = {
     },
     "aeon_shinonome": {
         "name": "イオン東雲店", "kind": "facility",
-        "lat": 35.6420, "lng": 139.8010, "capacity": 10000, "scale": 3500,
+        "lat": 35.648809, "lng": 139.802291, "capacity": 10000, "scale": 3500,
         "spillover_scale": 0.35,
         "place_query": "イオン東雲店", "place_address": "東京都江東区辰巳3-3-6",
     },
     # ---- 追加: 豊洲 -------------------------------------------------------
     "lalaport_toyosu": {
         "name": "ららぽーと豊洲", "kind": "facility",
-        "lat": 35.6553, "lng": 139.7925, "capacity": 45000, "scale": 10000,
+        "lat": 35.655396, "lng": 139.792294, "capacity": 45000, "scale": 10000,
         "place_query": "アーバンドック ららぽーと豊洲",
         "place_address": "東京都江東区豊洲2-4-9",
     },
@@ -129,29 +129,29 @@ SPOTS: dict[str, dict] = {
     },
     "toyosu_gururi": {
         "name": "豊洲ぐるり公園", "kind": "facility",
-        "lat": 35.6440, "lng": 139.7830, "capacity": 5000, "scale": 2500,
+        "lat": 35.64517, "lng": 139.785054, "capacity": 5000, "scale": 2500,
         "baseline_scale": 0.35, "place_query": "豊洲ぐるり公園",
         "place_address": "東京都江東区豊洲6-4",
     },
     # ---- 追加: お台場・青海 -----------------------------------------------
     "aquacity": {
         "name": "アクアシティお台場", "kind": "facility",
-        "lat": 35.6297, "lng": 139.7736, "capacity": 35000, "scale": 8000,
+        "lat": 35.62778, "lng": 139.773512, "capacity": 35000, "scale": 8000,
         "place_query": "アクアシティお台場", "place_address": "東京都港区台場1-7-1",
     },
     "decks": {
         "name": "デックス東京ビーチ", "kind": "facility",
-        "lat": 35.6288, "lng": 139.7748, "capacity": 25000, "scale": 6000,
+        "lat": 35.629048, "lng": 139.775901, "capacity": 25000, "scale": 6000,
         "place_query": "デックス東京ビーチ", "place_address": "東京都港区台場1-6-1",
     },
     "fujitv": {
         "name": "フジテレビ本社", "kind": "facility",
-        "lat": 35.6273, "lng": 139.7744, "capacity": 8000, "scale": 3000,
+        "lat": 35.626775, "lng": 139.774433, "capacity": 8000, "scale": 3000,
         "place_query": "フジテレビ本社ビル", "place_address": "東京都港区台場2-4-8",
     },
     "miraikan": {
         "name": "日本科学未来館", "kind": "facility",
-        "lat": 35.6194, "lng": 139.7766, "capacity": 6000, "scale": 2500,
+        "lat": 35.619282, "lng": 139.776707, "capacity": 6000, "scale": 2500,
         "place_query": "日本科学未来館", "place_address": "東京都江東区青海2-3-6",
     },
     "odaiba_beach": {

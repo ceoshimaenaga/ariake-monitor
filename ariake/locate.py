@@ -33,31 +33,28 @@ BASEMAP = os.path.join(os.path.dirname(HERE), "designs", "basemap.json")
 # basemap.json 上の名前が config と違うもの。
 # 値は (探す名前, 最低限の広さ m2)。広さは同名の小さな別棟を弾くために使う。
 MATCH: dict[str, tuple[str, int]] = {
-    "bigsight": ("東京ビッグサイト", 20000),
+    # OSM はビッグサイトを棟ごとに分けている。イラストにしている逆ピラミッドは
+    # 会議棟なので、そこに合わせる。
+    "bigsight": ("会議棟", 5000),
     "ariake_arena": ("有明アリーナ", 8000),
     "ariake_coliseum": ("有明コロシアム", 8000),
     "garden_theater": ("東京ガーデンシアター", 3000),
-    "shiki_ariake": ("有明四季劇場", 1500),
-    "gymex": ("有明GYM-EX", 1500),
     "ariake_garden": ("有明ガーデン", 5000),
     "ariake_tennis_forest": ("有明テニスの森", 0),
-    "ariake_sports": ("有明スポーツセンター", 1500),
     "ganken_ariake": ("がん研", 5000),
-    "izumi_spa": ("泉天空の湯", 0),
-    "aeon_ariake": ("イオンスタイル", 0),
     "aeon_shinonome": ("イオン", 3000),
-    "toyosu_market": ("豊洲市場", 10000),
+    "toyosu_market": ("千客万来", 3000),
     "lalaport_toyosu": ("ららぽーと豊洲", 10000),
-    "kidzania": ("キッザニア", 0),
-    "teamlab_planets": ("チームラボ", 0),
     "miraikan": ("日本科学未来館", 3000),
-    "fujitv": ("フジテレビ", 3000),
-    "aquacity": ("アクアシティ", 5000),
+    # フジテレビ本社は FCG ビル。"フジテレビ" だと湾岸スタジオを掴む。
+    "fujitv": ("FCGビル", 5000),
+    "aquacity": ("アクアシテイ", 5000),      # OSM 上の表記ゆれ (シテイ)
     "decks": ("デックス東京ビーチ", 5000),
-    "cruise_terminal": ("東京国際クルーズターミナル", 0),
-    "odaiba_beach": ("お台場海浜公園", 0),
-    "shiokaze": ("潮風公園", 0),
     "toyosu_gururi": ("豊洲ぐるり公園", 0),
+    # 以下は OSM に名前付きの輪郭が無いので、ここでは触らない:
+    #   有明スポーツセンター / 有明GYM-EX / 有明四季劇場 / 泉天空の湯 /
+    #   イオンスタイル有明ガーデン / キッザニア東京 / チームラボプラネッツ /
+    #   東京国際クルーズターミナル / お台場海浜公園 / 潮風公園
 }
 
 
