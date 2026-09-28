@@ -35,7 +35,10 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
 ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.osm.jp/api/interpreter",
 ]
+ROUNDS = 3              # 全エンドポイントを何周試すか (混雑時に 502/504 が続くため)
 MARGIN = 0.006          # 監視地点の外側にどれだけ余白を取るか (度)
 PRECISION = 5           # 座標の丸め桁 (5桁 ≒ 1m)
 MIN_BUILDING_PTS = 3
@@ -70,20 +73,26 @@ out geom;
 
 
 def fetch(q: str) -> dict:
+    import time
+
     import requests
     last = None
-    for url in ENDPOINTS:
-        try:
-            print(f"  Overpass に問い合わせ: {url}", flush=True)
-            r = requests.post(url, data={"data": q}, timeout=240,
-                              headers={"User-Agent": "AriakeCongestionMonitor/1.0"})
-            if r.status_code == 200:
-                return r.json()
-            print(f"  ! {r.status_code} {r.text[:200]}", flush=True)
-            last = f"{r.status_code}"
-        except Exception as e:                            # noqa: BLE001
-            print(f"  ! 失敗: {e}", flush=True)
-            last = str(e)
+    for rnd in range(ROUNDS):
+        for url in ENDPOINTS:
+            try:
+                print(f"  Overpass に問い合わせ ({rnd + 1}周目): {url}", flush=True)
+                r = requests.post(url, data={"data": q}, timeout=240,
+                                  headers={"User-Agent": "AriakeCongestionMonitor/1.0"})
+                if r.status_code == 200:
+                    return r.json()
+                print(f"  ! {r.status_code} {r.text[:120]}", flush=True)
+                last = f"{r.status_code}"
+            except Exception as e:                        # noqa: BLE001
+                print(f"  ! 失敗: {e}", flush=True)
+                last = str(e)
+        if rnd < ROUNDS - 1:
+            # 混んでいるときは少し待ってから周り直す
+            time.sleep(30 * (rnd + 1))
     raise SystemExit(f"Overpass から取得できませんでした: {last}")
 
 
