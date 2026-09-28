@@ -58,20 +58,25 @@ ALIASES: dict[str, str] = {
 }
 
 
-def query(names: list[str], stations: bool) -> str:
+def query() -> str:
+    """範囲内の「名前が付いているもの」を一度に全部取る。
+
+    名前ごとに正規表現で引くと Overpass 側が重くなって時間切れになるので、
+    問い合わせは1回だけにして、名前の突き合わせは手元でやる。
+    """
     s, w, n, e = BBOX
     box = f"({s},{w},{n},{e})"
-    parts = []
-    for nm in names:
-        esc = nm.replace('"', '\\"')
-        if stations:
-            # 駅はホームではなく駅そのもの (railway=station) を引く
-            parts.append(f'node["railway"="station"]["name"~"{esc}"]{box};')
-            parts.append(f'way["railway"="station"]["name"~"{esc}"]{box};')
-        else:
-            for t in ("node", "way", "relation"):
-                parts.append(f'{t}["name"~"{esc}"]{box};')
-    return "[out:json][timeout:120];(" + "".join(parts) + ");out center tags;"
+    return (
+        "[out:json][timeout:180];("
+        f'way["name"]{box};'
+        f'relation["name"]{box};'
+        f'node["name"]["railway"="station"]{box};'
+        f'node["name"]["amenity"]{box};'
+        f'node["name"]["shop"]{box};'
+        f'node["name"]["leisure"]{box};'
+        f'node["name"]["tourism"]{box};'
+        ");out center tags;"
+    )
 
 
 def fetch(q: str) -> dict:
@@ -106,7 +111,8 @@ def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(dx, dy)
 
 
-def best(elements: list[dict], want: str, cur: tuple[float, float]) -> dict | None:
+def best(elements: list[dict], want: str, cur: tuple[float, float],
+         station: bool) -> dict | None:
     """名前が一致するもののうち、今の座標に一番近いものを選ぶ。
 
     同名の別施設 (系列店など) に飛ばないよう、距離も見る。
@@ -114,8 +120,14 @@ def best(elements: list[dict], want: str, cur: tuple[float, float]) -> dict | No
     """
     cands = []
     for el in elements:
-        nm = (el.get("tags") or {}).get("name", "")
+        tags = el.get("tags") or {}
+        nm = tags.get("name", "")
         if want not in nm:
+            continue
+        # 駅は駅そのものだけ。同名のバス停や出入口に引っ張られないようにする。
+        if station and tags.get("railway") != "station":
+            continue
+        if not station and tags.get("railway") == "station":
             continue
         p = centre(el)
         if not p:
@@ -144,22 +156,17 @@ def main() -> None:
     # 道路など、建物を持たないものは対象外
     targets = {k: v for k, v in targets.items() if not k.startswith("road")}
 
-    stations = {k: v for k, v in targets.items() if k.startswith("st_")}
-    places = {k: v for k, v in targets.items() if not k.startswith("st_")}
+
+    print("Overpass 照会 (1回)", flush=True)
+    els = fetch(query()).get("elements", [])
+    print(f"  名前付き要素 {len(els)} 件", flush=True)
 
     found: dict[str, dict] = {}
-    for group, is_station in ((places, False), (stations, True)):
-        if not group:
-            continue
-        print(f"Overpass 照会: {len(group)} 件 ({'駅' if is_station else '施設'})", flush=True)
-        data = fetch(query(sorted(set(group.values())), is_station))
-        els = data.get("elements", [])
-        print(f"  該当 {len(els)} 要素", flush=True)
-        for sid, want in group.items():
-            cur = (SPOTS[sid]["lat"], SPOTS[sid]["lng"])
-            hit = best(els, want, cur)
-            if hit:
-                found[sid] = hit
+    for sid, want in targets.items():
+        cur = (SPOTS[sid]["lat"], SPOTS[sid]["lng"])
+        hit = best(els, want, cur, sid.startswith("st_"))
+        if hit:
+            found[sid] = hit
 
     print("\n--- ずれの大きい順 ---", flush=True)
     rows = sorted(found.items(), key=lambda kv: -kv[1]["dist"])

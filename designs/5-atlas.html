@@ -257,8 +257,7 @@ function sigmaFor(W, H, box) {
 
 function drawField(spots, h, box, byId) {
   var cv = document.getElementById("field");
-  var map = document.getElementById("map");
-  var W = map.clientWidth, H = map.clientHeight;
+  var W = box.W, H = box.H;
   if (!W || !H) return;
   var dpr = Math.min(2, window.devicePixelRatio || 1);
   cv.width = W * dpr; cv.height = H * dpr;
@@ -822,6 +821,9 @@ function draw() {
   var minLo = Math.min.apply(null, lngs), maxLo = Math.max.apply(null, lngs);
   var mapEl = document.getElementById("map");
   var MW = mapEl.clientWidth;
+  // 高さを変えると縦スクロールバーの有無が変わり、幅も変わることがある。
+  // 先に高さを決めてから幅を測り直さないと、canvas と地点マーカーが
+  // 別々の幅で座標を計算してしまい、地図と印がずれる。
   // 表示範囲の縦横比に合わせて地図の高さを決める。
   // 固定の高さだと、横長のエリアでは上下に、縦長のエリアでは左右に
   // 大きな余白ができて地形が小さくなってしまうため。
@@ -830,6 +832,7 @@ function draw() {
   var ratio = Math.max(maxLa - minLa, 1e-4) / (Math.max(maxLo - minLo, 1e-4) * kx0);
   var MH = Math.round(Math.max(380, Math.min(660, MW * ratio * 0.92)));
   mapEl.style.height = MH + "px";
+  MW = mapEl.clientWidth;
 
   // 緯度経度 → 画面座標。北が上。
   // 経度は cos(緯度) で補正した上で縦横同じ倍率を使い、足りない方向は
@@ -859,7 +862,9 @@ function draw() {
       return [midLo + (x - MW / 2) / scale / kx, midLa - (y - MH / 2) / scale];
     },
     // 地上 1m あたりの画面ピクセル数 (緯度1度 ≒ 111,320m)
-    mPx: scale / 111320
+    mPx: scale / 111320,
+    // 投影に使った描画領域の大きさ。canvas 側もこれを使う (再測定しない)。
+    W: MW, H: MH
   };
   BOX = box;
   FIT = { lng: fitLo, lat: fitLa, mPx: fitScale / 111320 };
