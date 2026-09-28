@@ -20,6 +20,8 @@ import math
 import os
 import re
 import sys
+import time
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ariake.config import SPOTS  # noqa: E402
@@ -59,6 +61,119 @@ MATCH: dict[str, tuple[str, int]] = {
 }
 
 
+# 名前だけを取りに行く軽い問い合わせ先。基盤地図の取得より桁違いに軽いので、
+# Overpass が混んでいても通りやすい。
+ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.osm.jp/api/interpreter",
+]
+
+
+def fetch_names(bbox: list[float]) -> list[dict]:
+    """名前の付いた建物と公園だけを取る。
+
+    基盤地図には道路も海岸線も入っていて重く、混雑時に 502/504 で落ちる。
+    ここで欲しいのは「名前と、だいたいの位置」だけなので、対象を絞って
+    軽く取り、正確な位置は手元の輪郭に当てて決める。
+    """
+    w, s_, e, n = bbox[0], bbox[1], bbox[2], bbox[3]
+    box = f"({s_},{w},{n},{e})"
+    q = ("[out:json][timeout:120];("
+         f'way["name"]["building"]{box};'
+         f'relation["name"]["building"]{box};'
+         f'way["name"]["leisure"="park"]{box};'
+         f'relation["name"]["leisure"="park"]{box};'
+         ");out center tags;")
+    last = None
+    for rnd in range(3):
+        for url in ENDPOINTS:
+            try:
+                print(f"  名前を取得 ({rnd + 1}周目): {url}", flush=True)
+                req = urllib.request.Request(
+                    url, data=("data=" + q).encode("utf-8"),
+                    headers={"User-Agent": "ariake-monitor/1.0 (locate)"})
+                with urllib.request.urlopen(req, timeout=180) as r:
+                    return json.loads(r.read().decode("utf-8")).get("elements", [])
+            except Exception as exc:                      # noqa: BLE001
+                print(f"  ! {exc}", flush=True)
+                last = exc
+        if rnd < 2:
+            time.sleep(20 * (rnd + 1))
+    raise SystemExit(f"名前を取得できませんでした: {last}")
+
+
+def ring_centre(ring: list[list[float]]) -> tuple[float, float]:
+    """輪郭の重心 (緯度, 経度)。重心が外に出る形では頂点の平均に逃がす。"""
+    a = 0.0; cx = 0.0; cy = 0.0
+    for i in range(len(ring)):
+        x0, y0 = ring[i]; x1, y1 = ring[(i + 1) % len(ring)]
+        f = x0 * y1 - x1 * y0
+        a += f; cx += (x0 + x1) * f; cy += (y0 + y1) * f
+    avg = (sum(p[1] for p in ring) / len(ring),
+           sum(p[0] for p in ring) / len(ring))
+    if abs(a) < 1e-12:
+        return avg
+    c = (cy / (3 * a), cx / (3 * a))
+    return c if inside(c, ring) else avg
+
+
+def inside(pt: tuple[float, float], ring: list[list[float]]) -> bool:
+    y, x = pt; ins = False; n = len(ring); j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]; xj, yj = ring[j]
+        if ((yi > y) != (yj > y)) and \
+                (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi):
+            ins = not ins
+        j = i
+    return ins
+
+
+def ring_m2(ring: list[list[float]]) -> float:
+    la = sum(p[1] for p in ring) / len(ring)
+    k = 111320 * math.cos(math.radians(la))
+    a = 0.0
+    for i in range(len(ring)):
+        x0, y0 = ring[i]; x1, y1 = ring[(i + 1) % len(ring)]
+        a += (x0 * k) * (y1 * 111320) - (x1 * k) * (y0 * 111320)
+    return abs(a) / 2
+
+
+def attach_names(base: dict) -> list[dict]:
+    """取ってきた名前を、手元の輪郭に貼り付ける。
+
+    Overpass の out center は外接矩形の中心なので、L字の建物では
+    建物の外に落ちる。その点を含む輪郭、無ければ一番近い輪郭を選び、
+    位置はその輪郭の重心にする。こうすると、印は必ず地図に描いてある
+    建物の上に乗る。
+    """
+    els = fetch_names(base["bbox"])
+    print(f"  名前付き {len(els)} 件", flush=True)
+    rings = [(r, ring_centre(r), ring_m2(r), "building") for r in base["buildings"]]
+    rings += [(r, ring_centre(r), ring_m2(r), "park") for r in base["parks"]]
+    out = []
+    for el in els:
+        nm = (el.get("tags") or {}).get("name")
+        if not nm:
+            continue
+        c = el.get("center") or ({"lat": el.get("lat"), "lon": el.get("lon")}
+                                 if el.get("lat") else None)
+        if not c:
+            continue
+        pt = (c["lat"], c["lon"])
+        hit = next((t for t in rings if inside(pt, t[0])), None)
+        if hit is None:
+            near = min(rings, key=lambda t: metres(pt, t[1]), default=None)
+            if near is None or metres(pt, near[1]) > 80:
+                continue
+            hit = near
+        out.append({"name": nm, "kind": hit[3],
+                    "lat": round(hit[1][0], 6), "lng": round(hit[1][1], 6),
+                    "m2": round(hit[2])})
+    return out
+
+
 def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
     dy = (a[0] - b[0]) * 111320
     dx = (a[1] - b[1]) * 111320 * math.cos(math.radians(a[0]))
@@ -87,10 +202,18 @@ def pick(named: list[dict], want: str, floor: int,
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--patch", action="store_true", help="config.py を書き換える")
+    ap.add_argument("--fetch-names", action="store_true",
+                    help="名前を取り直して basemap.json に貼り付ける")
     args = ap.parse_args()
 
     base = json.load(open(BASEMAP, encoding="utf-8"))
     named = base.get("named") or []
+    if args.fetch_names or not named:
+        named = attach_names(base)
+        base["named"] = named
+        json.dump(base, open(BASEMAP, "w", encoding="utf-8"),
+                  ensure_ascii=False, separators=(",", ":"))
+        print(f"basemap.json に名前を貼り付け: {len(named)} 件", flush=True)
     if not named:
         print("basemap.json に名前付きの輪郭がありません。"
               "先に basemap ワークフローを回してください。", flush=True)

@@ -10,6 +10,10 @@ on:
         description: "config.py を書き換えてコミットする"
         type: boolean
         default: true
+      fetch_names:
+        description: "名前を取り直して basemap.json に貼り付ける"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,19 +30,19 @@ jobs:
       - name: Locate
         env:
           PATCH: ${{ inputs.patch }}
+          FETCH: ${{ inputs.fetch_names }}
         run: |
-          if [ "$PATCH" = "true" ]; then
-            python ariake/locate.py --patch
-          else
-            python ariake/locate.py
-          fi
+          ARGS=""
+          [ "$FETCH" = "true" ] && ARGS="$ARGS --fetch-names"
+          [ "$PATCH" = "true" ] && ARGS="$ARGS --patch"
+          python ariake/locate.py $ARGS
 
       - name: Commit config.py
         if: ${{ inputs.patch }}
         run: |
           git config user.name "ariake-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ariake/config.py
+          git add ariake/config.py designs/basemap.json
           if git diff --staged --quiet; then
             echo "変更なし"
           else
