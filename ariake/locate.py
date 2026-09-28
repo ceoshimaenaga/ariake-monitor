@@ -22,7 +22,12 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ariake.config import SPOTS  # noqa: E402
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+# 公式インスタンスは混むと 504 を返すので、いくつか回す
+OVERPASS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
 
 # 有明・豊洲・お台場を含む範囲 (南, 西, 北, 東)
@@ -80,19 +85,20 @@ def query() -> str:
 
 
 def fetch(q: str) -> dict:
-    req = urllib.request.Request(
-        OVERPASS, data=("data=" + q).encode("utf-8"),
-        headers={"User-Agent": "ariake-monitor/1.0 (locate)"})
-    for attempt in range(4):
+    last = None
+    for attempt in range(6):
+        url = OVERPASS[attempt % len(OVERPASS)]
+        req = urllib.request.Request(
+            url, data=("data=" + q).encode("utf-8"),
+            headers={"User-Agent": "ariake-monitor/1.0 (locate)"})
         try:
             with urllib.request.urlopen(req, timeout=180) as r:
                 return json.loads(r.read().decode("utf-8"))
         except Exception as exc:                      # noqa: BLE001
-            if attempt == 3:
-                raise
-            print(f"  再試行 {attempt + 1}: {exc}", flush=True)
-            time.sleep(8 * (attempt + 1))
-    return {}
+            last = exc
+            print(f"  再試行 {attempt + 1} ({url.split('/')[2]}): {exc}", flush=True)
+            time.sleep(6 * (attempt + 1))
+    raise RuntimeError(f"Overpass に繋がらない: {last}")
 
 
 def centre(el: dict) -> tuple[float, float] | None:
