@@ -1,0 +1,13 @@
+[
+  {
+    "_comment": "スクレイパが取りこぼしたイベントを手で足すファイル。venue は ariake/config.py の SPOTS のキー。",
+    "venue": "bigsight",
+    "title": "（例）サンプル展示会",
+    "start_date": "2099-01-01",
+    "end_date": "2099-01-03",
+    "open_time": "10:00",
+    "start_time": "10:00",
+    "end_time": "17:00",
+    "est_attendance": 30000
+  }
+]

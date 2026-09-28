@@ -1,0 +1,55 @@
+name: ariake-render
+
+# JavaScript 描画が必要なイベントページ (有明アリーナ・有明四季劇場) を
+# 実ブラウザで取得し、ariake/rendered_events.json を更新する。
+#
+# ブラウザ起動は重いので毎時の収集(ariake.yml)とは分離し、6時間おきに実行する。
+# イベントスケジュールは1日に何度も変わるものではないので、これで十分。
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ariake-render
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt playwright
+
+      # ブラウザ本体は毎回ダウンロードすると遅いのでキャッシュする
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
+      - run: playwright install --with-deps chromium
+
+      - run: python ariake/render.py
+
+      - name: Commit rendered_events.json
+        run: |
+          git config user.name "ariake-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ariake/rendered_events.json
+          if git diff --staged --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: refresh ariake rendered events"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi

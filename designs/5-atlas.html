@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>有明 混雑モニター — 案5 ATLAS</title>
+<style>
+  /* デザインは3種類。どれも「色」だけの違いで、出しているデータは同じ。
+   * 地図の下地の色も CSS 変数で持たせ、canvas 側はそれを読んで描く。
+   * こうしておくと、デザインを足すときに JS を触らなくて済む。 */
+  :root, :root[data-design="midnight"] {           /* 夜のベイエリア */
+    color-scheme:dark; --is-dark:1;
+    --plane:#0d0d0d; --panel:#1a1a19; --line:#2c2c2a;
+    --text:#fff; --sec:#c3c2b7; --muted:#898781; --accent:#3987e5;
+    --critical:#d03b3b; --serious:#ec835a; --warning:#fab219; --good:#0ca30c;
+    --map-sea:#101a1e; --map-land:#161615; --map-park:#1b2a1c; --map-bldg:#262623;
+    --map-bldg-edge:rgba(255,255,255,.05); --map-shore:rgba(150,190,215,.45);
+    --map-minor:rgba(255,255,255,.07); --map-major:rgba(226,214,188,.20);
+    --map-rail:rgba(255,255,255,.14); --map-grid:rgba(255,255,255,.05);
+    --map-ink:rgba(195,194,183,.5); --map-major-w:2.5; --map-grid-w:1; }
+
+  :root[data-design="paper"] {                     /* 紙の地図 */
+    color-scheme:light; --is-dark:0;
+    --plane:#f6f4ed; --panel:#fffdf7; --line:#e2ddcd;
+    --text:#1a1814; --sec:#55514a; --muted:#8a8477; --accent:#b4561f;
+    --critical:#b3352f; --serious:#c9702f; --warning:#b9891a; --good:#3f7a34;
+    --map-sea:#dcdfd8; --map-land:#f8f4e9; --map-park:#dfe8d2; --map-bldg:#eae3d2;
+    --map-bldg-edge:rgba(26,24,20,.10); --map-shore:rgba(96,106,96,.6);
+    --map-minor:rgba(26,24,20,.09); --map-major:rgba(180,86,31,.35);
+    --map-rail:rgba(26,24,20,.20); --map-grid:rgba(26,24,20,.055);
+    --map-ink:rgba(85,81,74,.6); --map-major-w:2.5; --map-grid-w:1; }
+
+  :root[data-design="radar"] {                     /* 気象レーダー */
+    color-scheme:dark; --is-dark:1;
+    --plane:#060a10; --panel:#0c1320; --line:#172231;
+    --text:#eaf2ff; --sec:#9db4cc; --muted:#6d8399; --accent:#35d0e0;
+    --critical:#ff5d5d; --serious:#ff9a4d; --warning:#ffd23f; --good:#3fd98a;
+    --map-sea:#050a0f; --map-land:#0d1420; --map-park:#0f1c1a; --map-bldg:#17212e;
+    --map-bldg-edge:rgba(120,200,220,.10); --map-shore:rgba(90,200,220,.55);
+    --map-minor:rgba(140,190,220,.07); --map-major:rgba(140,190,220,.20);
+    --map-rail:rgba(140,190,220,.16); --map-grid:rgba(90,200,220,.13);
+    --map-ink:rgba(120,180,205,.65); --map-major-w:2; --map-grid-w:1.2; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--plane); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:24px 20px 100px; }
+  h1 { font-size:19px; margin:0; }
+  .sub { color:var(--muted); font-size:11px; margin:4px 0 18px; }
+  .scrub { background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:14px 18px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .scrub .lbl { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums;
+    min-width:172px; }
+  .scrub input { flex:1; min-width:240px; }
+  .scrub button { border:1px solid var(--line); background:transparent; color:var(--text);
+    border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
+  .map { position:relative; height:520px; margin:16px 0 0; border-radius:16px;
+    background:var(--panel); border:1px solid var(--line); overflow:hidden; }
+  .map canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .scrub .play { min-width:88px; font-weight:700; }
+  .scrub .play[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+  .note { color:var(--muted); font-size:11px; margin-top:8px; line-height:1.7; }
+  .areas { display:flex; gap:6px; flex-wrap:wrap; margin:14px 0 0; }
+  .areas button { border:1px solid var(--line); background:transparent; color:var(--muted);
+    border-radius:999px; padding:6px 14px; font-size:12px; cursor:pointer; }
+  .areas button.on { color:#fff; border-color:var(--accent); background:var(--accent); }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    justify-content:space-between; margin:14px 0 0; }
+  .skins { display:flex; gap:4px; align-items:center; }
+  .skins span { color:var(--muted); font-size:11px; margin-right:4px; }
+  .skins button { border:1px solid var(--line); background:var(--panel);
+    color:var(--muted); border-radius:8px; padding:5px 10px; font-size:11px;
+    cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .skins button.on { color:var(--text); border-color:var(--accent); }
+  .skins i { width:22px; height:12px; border-radius:3px; display:block;
+    border:1px solid rgba(128,128,128,.35); }
+  .map .node .glow { cursor:pointer; }
+  .map .node { position:absolute; transform:translate(-50%,-50%); text-align:center;
+    cursor:default; width:0; height:0; }
+  .map .glow { width:var(--d); height:var(--d); border-radius:50%; opacity:.92;
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    box-shadow:0 0 0 2px var(--panel); }
+  /* 建物イラスト。混雑度は背後の輪が担当し、建物自体は色を持たない */
+  .map .bldg { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:var(--b); height:auto; object-fit:contain; pointer-events:none;
+    filter:drop-shadow(0 2px 3px rgba(0,0,0,.55)); }
+  .map .ring { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:var(--r); height:var(--r); border-radius:50%; border:2px solid currentColor;
+    opacity:.9; }
+  .map .ring::after { content:""; position:absolute; inset:-6px; border-radius:50%;
+    border:1px solid currentColor; opacity:.35; }
+  .map .cap { position:absolute; left:50%; transform:translateX(-50%);
+    font-size:10px; color:var(--sec); white-space:nowrap; padding:1px 5px;
+    border-radius:4px; background:color-mix(in srgb, var(--panel) 88%, transparent);
+    border:1px solid var(--line); }
+  .map .cap.below { top:calc(50% + var(--half) + 4px); }
+  .map .cap.above { bottom:calc(50% + var(--half) + 4px); }
+  .map .cap b { font-variant-numeric:tabular-nums; }
+  .map .node.mine .cap { color:var(--accent); font-weight:700; }
+  .map .node.station .glow { border-radius:4px; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font-size:11px;
+    margin-top:12px; align-items:center; }
+  .legend b { width:12px; height:12px; border-radius:3px; display:inline-block;
+    margin-right:5px; vertical-align:-2px; }
+  h2 { font-size:12px; letter-spacing:.1em; color:var(--muted); margin:30px 0 10px;
+    text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { color:var(--muted); font-size:10px; text-align:left; font-weight:600;
+    padding:0 8px 6px; border-bottom:1px solid var(--line); }
+  td { padding:9px 8px; border-bottom:1px solid var(--line); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.mine td { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  footer { color:var(--muted); font-size:11px; margin-top:30px; line-height:1.8; }
+</style></head><body>
+<div class="wrap">
+  <h1>有明 混雑マップ</h1><div class="sub" id="sub"></div>
+  <div class="scrub">
+    <button class="play" id="play" aria-pressed="false">▶ 再生</button>
+    <span class="lbl" id="lbl"></span>
+    <input type="range" id="slider" min="0" max="71" value="0" aria-label="表示する時刻">
+    <button id="nowbtn">いまに戻す</button>
+  </div>
+  <div class="bar">
+    <div class="areas" id="areas"></div>
+    <div class="skins" id="skins"></div>
+  </div>
+  <div class="map" id="map"><canvas id="field"></canvas></div>
+  <div class="legend" id="legend"></div>
+  <p class="note" id="note"></p>
+  <h2 id="rankttl">この時間の混雑順</h2>
+  <table id="rank"></table>
+  <footer id="foot"></footer>
+</div>
+<script src="../ariake-common.js"></script><script src="../ariake-settings.js"></script>
+<script>
+var A = Ariake, hour = 0, timer = null, playing = false, area = "all";
+
+/* エリア。選ぶとその範囲だけを描くので、実質的な拡大図になる。
+ * 面の補間もそのエリアの地点だけで行うため、拡大しても意味が変わらない。 */
+/* 建物イラスト。実際の建物写真を参照に生成し、背景を抜いたもの。
+ * 参照した写真の出所は designs/refs/sources.json に記録してある。
+ * 用意が無いスポットは丸印のままにする。 */
+var ICONS = {
+  bigsight: "bigsight", ariake_arena: "ariake_arena", ariake_coliseum: "ariake_coliseum",
+  garden_theater: "garden_theater", ariake_garden: "ariake_garden",
+  shiki_ariake: "shiki_ariake", gymex: "gymex", ganken_ariake: "ganken_ariake",
+  ariake_tennis_forest: "ariake_tennis_forest", fujitv: "fujitv",
+  st_tokyo_bigsight: "station", st_kokusai_tenjijo: "station",
+  st_ariake: "station", st_ariake_tennis: "station"
+};
+var ICON_DIR = "icons/png/";
+
+/* ゆりかもめの区間。監視している駅の実座標を、実際の並び順で結んでいる。
+ * (座標も順序も実データなので、地図として嘘が無い範囲に留めている) */
+var RAIL = [{ name: "ゆりかもめ",
+  ids: ["st_ariake_tennis", "st_ariake", "st_tokyo_bigsight"] }];
+
+var AREAS = [
+  { id: "all", name: "全体" },
+  { id: "ariake", name: "有明", ids: ["bigsight","ariake_arena","ariake_coliseum",
+      "garden_theater","shiki_ariake","gymex","ariake_garden","ariake_tennis_forest",
+      "aeon_ariake","izumi_spa","ganken_ariake","ariake_sports","road_ariake",
+      "st_tokyo_bigsight","st_kokusai_tenjijo","st_ariake","st_ariake_tennis"] },
+  { id: "toyosu", name: "豊洲・東雲", ids: ["toyosu_market","lalaport_toyosu","kidzania",
+      "teamlab_planets","toyosu_gururi","aeon_shinonome"] },
+  { id: "odaiba", name: "お台場・青海", ids: ["odaiba","aquacity","decks","fujitv",
+      "miraikan","odaiba_beach","shiokaze","cruise_terminal"] }
+];
+function areaOf(id) {
+  for (var i = 1; i < AREAS.length; i++)
+    if (AREAS[i].ids.indexOf(id) >= 0) return AREAS[i].id;
+  return "all";
+}
+A.setBase("dark");
+
+/* 混雑の「面」を描く。
+ * 31地点の推定値しか無いので、地点間はガウス重み付き平均で補間している。
+ * 雨雲レーダーのように連続した分布に見えるが、実測の面ではない。
+ * 元になった地点が分かるよう、点と名前は面の上に必ず重ねて表示する。 */
+var FIELD = { gw: 0, gh: 0, off: null };
+function drawField(spots, h, box, byId) {
+  var cv = document.getElementById("field");
+  var map = document.getElementById("map");
+  var W = map.clientWidth, H = map.clientHeight;
+  if (!W || !H) return;
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = W * dpr; cv.height = H * dpr;
+  var ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  drawBase(ctx, W, H, spots, box);
+
+  var gw = 168, gh = Math.max(32, Math.round(168 * H / W));
+  if (!FIELD.off || FIELD.gw !== gw || FIELD.gh !== gh) {
+    FIELD.off = document.createElement("canvas");
+    FIELD.off.width = gw; FIELD.off.height = gh;
+    FIELD.gw = gw; FIELD.gh = gh;
+  }
+  var octx = FIELD.off.getContext("2d");
+  var img = octx.createImageData(gw, gh);
+  // にじみの広さ。画面の大きさではなく「地上の距離」で決める。
+  // 混雑は地点から概ね 400m くらいまで連続しているとみなす、という仮定で、
+  // 拡大しても縮小しても同じ広がりを表すようにしてある。
+  var sigma = Math.max(38, Math.min(Math.min(W, H) * 0.34, box.mPx * 400));
+  var inv = 1 / (2 * sigma * sigma);
+
+  // 各地点の画面座標と、その時刻のスコア
+  var pts = spots.map(function (s) {
+    return { x: s._x / 100 * W, y: s._y / 100 * H, v: s.series[h].score };
+  });
+
+  for (var gy = 0; gy < gh; gy++) {
+    for (var gx = 0; gx < gw; gx++) {
+      var px = (gx + 0.5) / gw * W, py = (gy + 0.5) / gh * H;
+      var num = 0, den = 0, near = 0;
+      for (var i = 0; i < pts.length; i++) {
+        var dx = px - pts[i].x, dy = py - pts[i].y;
+        var w = Math.exp(-(dx * dx + dy * dy) * inv);
+        num += w * pts[i].v; den += w;
+        if (w > near) near = w;
+      }
+      var v = den > 1e-6 ? num / den : 0;
+      var rgb = hexToRgb(A.cellColor(v));
+      // 5段階の等値帯にする。連続的に薄くするより、天気レーダーのように
+      // 「どこからが混むのか」の境目が読めるようにするため。
+      var alpha = BAND_ALPHA[A.rankOf(v) - 1] * Math.min(1, near * 4.5);
+      var o = (gy * gw + gx) * 4;
+      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
+      img.data[o + 3] = Math.round(alpha * 255);
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(FIELD.off, 0, 0, gw, gh, 0, 0, W, H);
+  drawRail(ctx, byId, box);
+  drawScale(ctx, W, H, box);
+}
+// 等値帯の濃さ (すいている→非常に混雑)。
+// 「すいている」は透明にして、混んでいる所だけが地図の上に浮かぶようにする。
+var BAND_ALPHA = [0.00, 0.16, 0.32, 0.50, 0.70];
+/* ラベルの重なりを実際の描画位置で判定して間引く。
+ * 優先度は「自分で固定した場所 > 混雑している場所」。
+ * 上下を入れ替えても収まらないものだけ消し、内容はカーソルで読めるようにしてある。 */
+function declutter(map) {
+  var nodes = Array.prototype.slice.call(map.querySelectorAll(".node[data-pri]"))
+    .filter(function (n) { return n.querySelector(".cap"); })
+    .sort(function (a, b) { return b.dataset.pri - a.dataset.pri; });
+  var placed = [];
+  function hits(r) {
+    return placed.some(function (p) {
+      return !(r.right < p.left - 2 || r.left > p.right + 2 ||
+               r.bottom < p.top - 2 || r.top > p.bottom + 2);
+    });
+  }
+  nodes.forEach(function (n) {
+    var cap = n.querySelector(".cap");
+    var r = cap.getBoundingClientRect();
+    if (hits(r)) {
+      cap.classList.toggle("above"); cap.classList.toggle("below");
+      r = cap.getBoundingClientRect();
+    }
+    if (hits(r)) cap.remove(); else placed.push(r);
+  });
+}
+
+/* 地図の下地。OpenStreetMap から取った実際の地形を描く。
+ *   陸地 / 運河・水域 / 公園 / 建物の輪郭 / 道路 / 鉄道
+ * 海岸線から陸のポリゴンを組み立ててあるので、運河や埋立地の形は実物どおり。
+ * データ: © OpenStreetMap contributors (ODbL) */
+var BASEMAP = null;
+fetch("basemap.json").then(function (r) { return r.json(); })
+  .then(function (b) { BASEMAP = b; if (window.DATA) draw(); })
+  .catch(function () { /* 取れなければグリッドだけで描く */ });
+
+/* 地図の色は CSS 変数から読む。閲覧者がデザインを切り替えた瞬間に
+ * canvas も同じ色で描き直されるので、CSS と JS の食い違いが起きない。 */
+function cssVar(name, fallback) {
+  try {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (v) return v;
+  } catch (e) { /* 取得できない環境では既定値 */ }
+  return fallback;
+}
+function paletteBase() {
+  return {
+    sea: cssVar("--map-sea", "#101a1e"),
+    land: cssVar("--map-land", "#161615"),
+    park: cssVar("--map-park", "#1b2a1c"),
+    bldg: cssVar("--map-bldg", "#262623"),
+    bldgEdge: cssVar("--map-bldg-edge", "rgba(255,255,255,.05)"),
+    shore: cssVar("--map-shore", "rgba(150,190,215,.45)"),
+    minor: cssVar("--map-minor", "rgba(255,255,255,.07)"),
+    major: cssVar("--map-major", "rgba(226,214,188,.20)"),
+    rail: cssVar("--map-rail", "rgba(255,255,255,.14)"),
+    grid: cssVar("--map-grid", "rgba(255,255,255,.05)"),
+    ink: cssVar("--map-ink", "rgba(195,194,183,.5)"),
+    majorW: parseFloat(cssVar("--map-major-w", "2.5")) || 2.5,
+    gridW: parseFloat(cssVar("--map-grid-w", "1")) || 1
+  };
+}
+
+/* 選べるデザイン。中身(データ・地図の形)は共通で、色だけが変わる。 */
+var DESIGNS = [
+  { id: "midnight", name: "夜のベイ", sw: ["#161615", "#101a1e", "#3987e5"] },
+  { id: "paper",    name: "紙の地図", sw: ["#f8f4e9", "#dcdfd8", "#b4561f"] },
+  { id: "radar",    name: "レーダー", sw: ["#0d1420", "#050a0f", "#35d0e0"] }
+];
+function currentDesign() {
+  var d = A.personal.design;
+  return DESIGNS.some(function (x) { return x.id === d; }) ? d : "midnight";
+}
+function mountSkins() {
+  var cur = currentDesign();
+  var el = document.getElementById("skins");
+  el.innerHTML = '<span>デザイン</span>' + DESIGNS.map(function (d) {
+    var bar = d.sw.map(function (c) {
+      return '<i style="background:' + c + '"></i>';
+    }).join("");
+    return '<button class="' + (d.id === cur ? "on" : "") + '" data-d="' + d.id + '" ' +
+      'aria-pressed="' + (d.id === cur) + '" title="' + d.name + '">' + bar +
+      '<b style="font-weight:600">' + d.name + '</b></button>';
+  }).join("");
+  el.querySelectorAll("button").forEach(function (b) {
+    b.onclick = function () {
+      // テーマも一緒に合わせておく。他のページを開いたときに明暗がちぐはぐに
+      // ならないようにするため。
+      A.setPersonal({ design: b.dataset.d, theme: b.dataset.d === "paper" ? "light" : "dark" });
+    };
+  });
+}
+
+function ringPath(ctx, ring, box) {
+  var p = box.px(ring[0][0], ring[0][1]);
+  ctx.moveTo(p[0], p[1]);
+  for (var i = 1; i < ring.length; i++) {
+    p = box.px(ring[i][0], ring[i][1]);
+    ctx.lineTo(p[0], p[1]);
+  }
+  ctx.closePath();
+}
+function linePath(ctx, way, box) {
+  var p = box.px(way[0][0], way[0][1]);
+  ctx.moveTo(p[0], p[1]);
+  for (var i = 1; i < way.length; i++) {
+    p = box.px(way[i][0], way[i][1]);
+    ctx.lineTo(p[0], p[1]);
+  }
+}
+/* 表示範囲より外にはみ出す図形は描かない (拡大時の無駄を省くため) */
+function visible(way, box, pad) {
+  var loPad = (box.maxLo - box.minLo) * pad, laPad = (box.maxLa - box.minLa) * pad;
+  for (var i = 0; i < way.length; i++) {
+    var q = way[i];
+    if (q[0] > box.minLo - loPad && q[0] < box.maxLo + loPad &&
+        q[1] > box.minLa - laPad && q[1] < box.maxLa + laPad) return true;
+  }
+  return false;
+}
+
+function drawBase(ctx, W, H, spots, box) {
+  var c = paletteBase();
+  var b = BASEMAP;
+
+  if (b) {
+    // 海 → 陸 → 公園 → 建物 の順に重ねる
+    ctx.fillStyle = c.sea; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = c.land; ctx.beginPath();
+    b.land.forEach(function (r) { ringPath(ctx, r, box); });
+    ctx.fill("evenodd");
+    if (b.land_holes && b.land_holes.length) {
+      ctx.fillStyle = c.sea; ctx.beginPath();
+      b.land_holes.forEach(function (r) { ringPath(ctx, r, box); });
+      ctx.fill("evenodd");
+    }
+    // 運河・池
+    ctx.fillStyle = c.sea; ctx.beginPath();
+    b.water.forEach(function (r) { if (visible(r, box, .3)) ringPath(ctx, r, box); });
+    ctx.fill("evenodd");
+    // 海岸線
+    ctx.strokeStyle = c.shore; ctx.lineWidth = 1; ctx.beginPath();
+    b.coastline.forEach(function (w) { if (visible(w, box, .3)) linePath(ctx, w, box); });
+    ctx.stroke();
+    // 公園・緑地
+    ctx.fillStyle = c.park; ctx.beginPath();
+    b.parks.forEach(function (r) { if (visible(r, box, .2)) ringPath(ctx, r, box); });
+    ctx.fill();
+    // 道路 (細→太)
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = c.minor; ctx.lineWidth = 1; ctx.beginPath();
+    b.roads_minor.forEach(function (w) { if (visible(w, box, .2)) linePath(ctx, w, box); });
+    ctx.stroke();
+    ctx.strokeStyle = c.major; ctx.lineWidth = c.majorW; ctx.beginPath();
+    b.roads_major.forEach(function (w) { if (visible(w, box, .2)) linePath(ctx, w, box); });
+    ctx.stroke();
+    // 建物の輪郭
+    ctx.fillStyle = c.bldg; ctx.strokeStyle = c.bldgEdge; ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    b.buildings.forEach(function (r) { if (visible(r, box, .1)) ringPath(ctx, r, box); });
+    ctx.fill(); ctx.stroke();
+    // 鉄道
+    ctx.strokeStyle = c.rail; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    b.rail.forEach(function (w) { if (visible(w, box, .2)) linePath(ctx, w, box); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // 緯度経度グリッド (下地の有無にかかわらず出す)
+  ctx.save();
+  ctx.strokeStyle = c.grid; ctx.lineWidth = c.gridW;
+  ctx.font = "10px system-ui, sans-serif"; ctx.fillStyle = c.ink;
+  var stepLng = niceStep(box.maxLo - box.minLo);
+  var stepLat = niceStep(box.maxLa - box.minLa);
+  for (var lo = Math.ceil(box.minLo / stepLng) * stepLng; lo <= box.maxLo; lo += stepLng) {
+    var x = box.px(lo, box.minLa)[0];
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    ctx.fillText("E" + lo.toFixed(3), x + 4, H - 6);
+  }
+  for (var la = Math.ceil(box.minLa / stepLat) * stepLat; la <= box.maxLa; la += stepLat) {
+    var y = box.px(box.minLo, la)[1];
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillText("N" + la.toFixed(3), 6, y - 4);
+  }
+  ctx.restore();
+}
+
+function drawRail(ctx, byId, box) {
+  ctx.save();
+  RAIL.forEach(function (r) {
+    var pts = r.ids.map(function (id) { return byId[id]; })
+      .filter(Boolean).map(function (s) { return box.px(s.lng, s.lat); });
+    if (pts.length < 2) return;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = A.isDark() ? "rgba(255,255,255,.30)" : "rgba(11,11,11,.30)";
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    pts.slice(1).forEach(function (p) { ctx.lineTo(p[0], p[1]); });
+    ctx.stroke();
+    ctx.strokeStyle = A.isDark() ? "rgba(13,13,13,.9)" : "rgba(252,252,251,.9)";
+    ctx.lineWidth = 3; ctx.setLineDash([9, 7]);
+    ctx.stroke(); ctx.setLineDash([]);
+    // 路線名
+    var mid = pts[Math.floor(pts.length / 2)];
+    ctx.font = "700 10px system-ui, sans-serif";
+    ctx.fillStyle = A.isDark() ? "rgba(195,194,183,.8)" : "rgba(82,81,78,.85)";
+    ctx.fillText(r.name, mid[0] + 10, mid[1] - 8);
+  });
+  ctx.restore();
+}
+
+function drawScale(ctx, W, H, box) {
+  // 1pxあたりの距離 (この緯度での経度1度の長さから求める)
+  var mPerDegLng = 111320 * Math.cos(((box.minLa + box.maxLa) / 2) * Math.PI / 180);
+  var mPerPx = (box.maxLo - box.minLo) * mPerDegLng / W;
+  var target = 130 * mPerPx;
+  var steps = [50, 100, 200, 300, 500, 750, 1000, 2000, 3000, 5000];
+  var d = steps.reduce(function (a, b) {
+    return Math.abs(b - target) < Math.abs(a - target) ? b : a;
+  });
+  var px = d / mPerPx;
+  var x = 16, y = H - 18;
+  ctx.save();
+  ctx.strokeStyle = A.isDark() ? "rgba(255,255,255,.75)" : "rgba(11,11,11,.7)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(x + px, y - 5);
+  ctx.stroke();
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.fillStyle = A.isDark() ? "rgba(195,194,183,.9)" : "rgba(82,81,78,.9)";
+  ctx.fillText(d >= 1000 ? (d / 1000) + " km" : d + " m", x + px + 7, y + 1);
+  // 方位 (緯度をそのまま縦軸にしているので、上が北で正しい)
+  var nx = W - 26, ny = 26;
+  ctx.beginPath(); ctx.moveTo(nx, ny + 11); ctx.lineTo(nx, ny - 9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(nx - 4, ny - 4); ctx.lineTo(nx, ny - 10);
+  ctx.lineTo(nx + 4, ny - 4); ctx.stroke();
+  ctx.fillText("N", nx - 3, ny + 23);
+  ctx.restore();
+}
+
+function niceStep(span) {
+  var raw = span / 4;
+  var pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  var n = raw / pow;
+  return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * pow;
+}
+
+function hexToRgb(hex) {
+  var n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function setHour(h) {
+  hour = h;
+  document.getElementById("slider").value = h;
+  draw();
+}
+function stop() {
+  playing = false;
+  if (timer) { clearInterval(timer); timer = null; }
+  var b = document.getElementById("play");
+  b.textContent = "▶ 再生"; b.setAttribute("aria-pressed", "false");
+}
+function play() {
+  var max = +document.getElementById("slider").max;
+  playing = true;
+  var b = document.getElementById("play");
+  b.textContent = "⏸ 停止"; b.setAttribute("aria-pressed", "true");
+  timer = setInterval(function () {
+    setHour(hour >= max ? 0 : hour + 1);
+  }, 160);
+}
+A.load("../ariake.json").then(function (d) {
+  window.DATA = d; AriakeSettings.mount(d);
+  var sl = document.getElementById("slider");
+  sl.max = Math.min(71, d.spots[d.spot_order[0]].series.length - 1);
+  sl.oninput = function () { stop(); hour = +sl.value; draw(); };
+  document.getElementById("nowbtn").onclick = function () { stop(); setHour(0); };
+  document.getElementById("play").onclick = function () { playing ? stop() : play(); };
+  addEventListener("resize", function () { draw(); });
+  document.addEventListener("ariake:personal", draw);
+  draw();
+});
+
+function draw() {
+  var d = window.DATA, p = A.personal;
+  document.getElementById("sub").textContent =
+    new Date(d.generated_at).toLocaleString("ja-JP") + " 更新 ／ スライダーで3日先まで動かせます";
+
+  var spots = A.orderedSpots(d).filter(function (s) { return s.lat && s.lng; });
+  var def = AREAS.filter(function (a) { return a.id === area; })[0] || AREAS[0];
+  if (def.ids) {
+    var inArea = spots.filter(function (s) { return def.ids.indexOf(s.id) >= 0; });
+    if (inArea.length) spots = inArea; else { area = "all"; def = AREAS[0]; }
+  }
+  document.getElementById("areas").innerHTML = AREAS.map(function (a) {
+    return '<button class="' + (a.id === area ? "on" : "") + '" data-a="' + a.id + '">' +
+      a.name + '</button>';
+  }).join("");
+  document.getElementById("areas").querySelectorAll("button").forEach(function (btn) {
+    btn.onclick = function () { area = btn.dataset.a; draw(); };
+  });
+  mountSkins();
+  var lats = spots.map(function (s) { return s.lat; }),
+      lngs = spots.map(function (s) { return s.lng; });
+  var minLa = Math.min.apply(null, lats), maxLa = Math.max.apply(null, lats);
+  var minLo = Math.min.apply(null, lngs), maxLo = Math.max.apply(null, lngs);
+  var mapEl = document.getElementById("map");
+  var MW = mapEl.clientWidth;
+  // 表示範囲の縦横比に合わせて地図の高さを決める。
+  // 固定の高さだと、横長のエリアでは上下に、縦長のエリアでは左右に
+  // 大きな余白ができて地形が小さくなってしまうため。
+  var kx0 = Math.cos((minLa + maxLa) / 2 * Math.PI / 180);
+  var ratio = Math.max(maxLa - minLa, 1e-4) / (Math.max(maxLo - minLo, 1e-4) * kx0);
+  var MH = Math.round(Math.max(380, Math.min(660, MW * ratio * 0.92)));
+  mapEl.style.height = MH + "px";
+  // 緯度経度 → 画面座標。北が上。
+  // 縦横で別々に引き伸ばすと地形が歪むので、経度は cos(緯度) で補正した上で
+  // 縦横同じ倍率を使い、足りない方向は余白にしている (地図として正しい形を保つ)。
+  var padPx = 62;
+  var midLa = (minLa + maxLa) / 2, midLo = (minLo + maxLo) / 2;
+  var kx = kx0;
+  var spanLo = Math.max(maxLo - minLo, 1e-4) * kx;
+  var spanLa = Math.max(maxLa - minLa, 1e-4);
+  var scale = Math.min((MW - padPx * 2) / spanLo, (MH - padPx * 2) / spanLa);
+  var box = {
+    minLa: midLa - (MH / 2) / scale, maxLa: midLa + (MH / 2) / scale,
+    minLo: midLo - (MW / 2) / scale / kx, maxLo: midLo + (MW / 2) / scale / kx,
+    px: function (lng, lat) {
+      return [MW / 2 + (lng - midLo) * kx * scale,
+              MH / 2 - (lat - midLa) * scale];
+    },
+    pct: function (lng, lat) {
+      var q = box.px(lng, lat);
+      return [q[0] / MW * 100, q[1] / MH * 100];
+    },
+    // 地上 1m あたりの画面ピクセル数 (緯度1度 ≒ 111,320m)
+    mPx: scale / 111320
+  };
+  var byId = {};
+  spots.forEach(function (x) { byId[x.id] = x; });
+
+  spots.forEach(function (s) {
+    var c = box.pct(s.lng, s.lat);
+    s._x = c[0]; s._y = c[1];
+  });
+
+  var slot = spots[0].series[hour].slot;
+  document.getElementById("lbl").textContent = A.when(slot) +
+    (hour ? "（" + hour + "時間後）" : "（いま）");
+  drawField(spots, hour, box, byId);
+
+  var map = document.getElementById("map");
+  map.querySelectorAll(".node").forEach(function (n) { n.remove(); });
+  // 有明周辺は施設が密集していてラベルが重なるので、名前を出すのは
+  // 「自分で固定した場所」と「その時間の混雑上位5件」だけにする。
+  var named = {};
+  // 拡大しているときは地点が少ないので全部に名前を出せる
+  var topN = (area === "all") ? 5 : spots.length;
+  spots.slice().sort(function (a, b) {
+    return b.series[hour].score - a.series[hour].score;
+  }).slice(0, topN).forEach(function (s) { named[s.id] = true; });
+  spots.forEach(function (s) {
+    if (s.id === p.home || p.pinned.indexOf(s.id) >= 0) named[s.id] = true;
+  });
+  var labelIndex = 0;
+  spots.forEach(function (s) {
+    var v = s.series[hour], sc = v.score;
+    var x = s._x, y = s._y;
+    var mine = s.id === p.home || p.pinned.indexOf(s.id) >= 0;
+    var icon = (area !== "all") && ICONS[s.id];     // 拡大したときだけイラストにする
+    var dia = 13 + Math.round(sc / 100 * 27);
+    var bs = 72, ring = 30 + Math.round(sc / 100 * 34);
+    var half = icon ? Math.max(bs, ring) / 2 : dia / 2;
+    var n = document.createElement("div");
+    n.className = "node " + s.kind + (mine ? " mine" : "");
+    n.style.left = x + "%"; n.style.top = y + "%";
+    n.style.setProperty("--half", half + "px");
+    var side = (labelIndex++ % 2) ? "above" : "below";   // 上下交互で重なりを減らす
+    var mark = icon
+      ? '<div class="ring" style="--r:' + ring + 'px;color:' + A.rampColor(sc) + '"></div>' +
+        '<img class="bldg" style="--b:' + bs + 'px" alt="" src="' + ICON_DIR + icon + '.png">'
+      : '<div class="glow" style="--d:' + dia + 'px;background:' + A.rampColor(sc) + '"></div>';
+    n.innerHTML = mark + (named[s.id]
+        ? '<div class="cap ' + side + '">' + (mine ? "★" : "") + s.name + ' <b>' +
+          Math.round(sc) + '</b></div>' : '');
+    n.title = s.name + " " + A.when(slot) + " 混雑度" + Math.round(sc) + "・" +
+      A.levelOf(sc).label + (A.mainCause(v.factors) ? "\n" + A.mainCause(v.factors) : "") +
+      (area === "all" ? "\nクリックでこのエリアを拡大" : "");
+    if (area === "all") {
+      var to = areaOf(s.id);
+      var hit = n.querySelector(".glow");
+      if (to !== "all" && hit) hit.onclick = function () { area = to; draw(); };
+    }
+    n.dataset.pri = (mine ? 1000 : 0) + sc;
+    map.appendChild(n);
+  });
+  declutter(map);
+
+  document.getElementById("legend").innerHTML = A.LEVELS.map(function (l) {
+    return '<span><b style="background:' + A.rampColor(l.max - 1) + '"></b>' + l.label + '</span>';
+  }).join("") + '<span>丸の大きさ＝混雑度。四角は駅。' +
+  (area === "all" ? '名前は混雑上位と固定した場所のみ。' : '名前が入りきらない場所は省いています。') +
+  'カーソルを当てると詳細が出ます。</span>' +
+  '<span>破線＝ゆりかもめ（監視している駅を結んだ区間）。左下は距離、右上は方位。</span>' +
+  '<span>下地の海岸線・運河・建物・道路は OpenStreetMap の実データです。</span>';
+
+  document.getElementById("rankttl").textContent =
+    "この時間の混雑順" + (def.ids ? "（" + def.name + "）" : "");
+  var rows = spots.map(function (s) {
+    return { s: s, v: s.series[hour] };
+  }).sort(function (a, b) { return b.v.score - a.v.score; }).slice(0, 10);
+  document.getElementById("rank").innerHTML =
+    '<tr><th>場所</th><th class="num">混雑度</th><th>状態</th><th>主な理由</th></tr>' +
+    rows.map(function (r) {
+      var mine = r.s.id === p.home || p.pinned.indexOf(r.s.id) >= 0;
+      return '<tr class="' + (mine ? 'mine' : '') + '"><td>' + (mine ? '★ ' : '') + r.s.name +
+        '</td><td class="num" style="color:' + A.rampColor(r.v.score) + '">' +
+        Math.round(r.v.score) + '</td><td>' + A.levelOf(r.v.score).label +
+        '</td><td style="color:var(--muted)">' + (A.mainCause(r.v.factors) || "平常の人出") +
+        '</td></tr>';
+    }).join("");
+
+  document.getElementById("note").textContent =
+    "面の濃淡は " + spots.length + " 地点の推定値を地点間で補間して描いたものです。" +
+    "実測した面ではないため、地点から離れた場所ほど薄く表示しています。" +
+    "元になった地点は丸で重ねています。" +
+    (area === "all" ? "丸をクリックするとそのエリアを拡大します。" : "");
+  document.getElementById("foot").innerHTML =
+    (d.attribution || []).join(" ／ ") +
+    '<br>地形・建物・道路・鉄道: © <a href="https://www.openstreetmap.org/copyright" ' +
+    'style="color:inherit">OpenStreetMap contributors</a> (ODbL)' +
+    '<br>建物イラストは実際の建物写真を参照して生成したものです。';
+}
+</script></body></html>

@@ -1,0 +1,58 @@
+name: collect
+
+# 有明エリアの混雑データを毎時収集し、ariake.json を更新してコミットする。
+# コミットが main に載ると pages ワークフローが走り、公開ページが最新化される。
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # 観測ログを実行間で引き継ぐ (貯まるほど平常値の精度が上がる)
+      - name: Restore ariake DB
+        uses: actions/cache@v4
+        with:
+          path: ariake.db
+          key: ariake-db-${{ github.run_id }}
+          restore-keys: |
+            ariake-db-
+
+      # 有料APIは使っていないので、シークレットが無くても動く
+      - name: Collect
+        env:
+          ODPT_TOKEN: ${{ secrets.ODPT_TOKEN }}
+          BESTTIME_API_KEY: ${{ secrets.BESTTIME_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: python ariake/collect.py
+
+      - name: Commit ariake.json
+        run: |
+          git config user.name "ariake-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ariake.json
+          if git diff --staged --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: refresh ariake congestion data"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi

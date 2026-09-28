@@ -1,0 +1,32 @@
+name: ariake-basemap
+
+# OpenStreetMap から有明周辺の地形データを取得して designs/basemap.json を作る。
+# 地形はそう変わらないので手動実行のみ。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python ariake/fetch_basemap.py
+      - name: Commit basemap.json
+        run: |
+          git config user.name "ariake-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add designs/basemap.json
+          if git diff --staged --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: refresh ariake basemap from OpenStreetMap"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi

@@ -1,0 +1,70 @@
+{
+ "generated_at": "2026-09-28T14:24:40+09:00",
+ "events": [
+  {
+   "venue": "ariake_arena",
+   "title": "JOURNEY",
+   "url": "https://www.udo.jp/shows/Journey26",
+   "start_date": "2026-09-01",
+   "end_date": "2026-09-01",
+   "open_time": "18:00",
+   "start_time": "19:00",
+   "end_time": "20:30",
+   "est_attendance": 10000,
+   "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "ariake_arena",
+   "title": "TREASURE",
+   "url": "https://ygex.jp/treasure/",
+   "start_date": "2026-09-05",
+   "end_date": "2026-09-05",
+   "open_time": "12:30",
+   "start_time": "13:30",
+   "end_time": "17:00",
+   "est_attendance": 10000,
+   "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "ariake_arena",
+   "title": "HIROMITSU KITAYAMA",
+   "url": "https://tobe-official.jp/",
+   "start_date": "2026-09-19",
+   "end_date": "2026-09-19",
+   "open_time": "17:00",
+   "start_time": "18:00",
+   "end_time": "20:30",
+   "est_attendance": 10000,
+   "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "ariake_arena",
+   "title": "スピッツ, Teenage Fanclub, 羊文学, Ride",
+   "url": "https://rockmansai.com",
+   "start_date": "2026-09-22",
+   "end_date": "2026-09-22",
+   "open_time": "15:00",
+   "start_time": "16:00",
+   "end_time": "20:30",
+   "est_attendance": 10000,
+   "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "ariake_arena",
+   "title": "CUTIE STREET",
+   "url": "https://cutiestreet.asobisystem.com/feature/autumntour",
+   "start_date": "2026-09-29",
+   "end_date": "2026-09-29",
+   "open_time": "16:00",
+   "start_time": "18:00",
+   "end_time": "20:30",
+   "est_attendance": 10000,
+   "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  }
+ ]
+}
