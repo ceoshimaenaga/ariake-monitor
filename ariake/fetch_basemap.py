@@ -22,6 +22,7 @@ GitHub Actions の ariake-basemap ワークフローから手動実行できる�
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 
@@ -94,6 +95,42 @@ def line(geom: list[dict]) -> list[list[float]]:
         if not out or out[-1] != c:
             out.append(c)
     return out
+
+
+def note(out, tags, pts, kind):
+    """名前の付いた輪郭を、重心と広さを添えて控えておく。"""
+    nm = tags.get("name")
+    if not nm:
+        return
+    a = 0.0; cx = 0.0; cy = 0.0
+    for i in range(len(pts)):
+        x0, y0 = pts[i]; x1, y1 = pts[(i + 1) % len(pts)]
+        f = x0 * y1 - x1 * y0
+        a += f; cx += (x0 + x1) * f; cy += (y0 + y1) * f
+    if abs(a) < 1e-12:
+        c = [sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)]
+    else:
+        c = [cx / (3 * a), cy / (3 * a)]
+    # 中庭のある建物などで重心が輪郭の外に出たら、頂点の平均に逃がす
+    if not inside_ring(c, pts):
+        c = [sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)]
+    la = c[1]
+    k = 111320 * math.cos(math.radians(la))
+    area = abs(a) / 2 * k * 111320
+    out["named"].append({"name": nm, "kind": kind,
+                         "lng": round(c[0], 6), "lat": round(c[1], 6),
+                         "m2": round(area)})
+
+
+def inside_ring(pt, ring):
+    x, y = pt; ins = False; n = len(ring); j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]; xj, yj = ring[j]
+        if ((yi > y) != (yj > y)) and \
+                (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi):
+            ins = not ins
+        j = i
+    return ins
 
 
 def build_land(out):
@@ -233,6 +270,10 @@ def main() -> None:
 
     out = {"bbox": [b[1], b[0], b[3], b[2]],   # [西, 南, 東, 北]
            "water": [], "coastline": [], "parks": [], "buildings": [],
+           # 名前の付いた建物・公園。地図として描いている輪郭そのものに
+           # 名前を持たせておくと、スポットの位置をこの重心に合わせられる。
+           # 印と建物が別々の出どころにならないので、原理的にずれない。
+           "named": [],
            "roads_major": [], "roads_minor": [], "rail": [],
            "attribution": "© OpenStreetMap contributors"}
 
@@ -254,9 +295,11 @@ def main() -> None:
                 t.get("landuse") in ("grass", "forest", "recreation_ground"):
             if len(pts) >= MIN_BUILDING_PTS:
                 out["parks"].append(pts)
+                note(out, t, pts, "park")
         elif "building" in t:
             if len(pts) >= MIN_BUILDING_PTS:
                 out["buildings"].append(pts)
+                note(out, t, pts, "building")
         elif "highway" in t:
             key = "roads_major" if t["highway"] in MAJOR else "roads_minor"
             out[key].append(pts)
@@ -269,7 +312,7 @@ def main() -> None:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
     size = os.path.getsize(os.path.normpath(OUT)) / 1024
     print(f"basemap.json 書き出し: {size:.0f} KB", flush=True)
-    for k in ("land", "water", "coastline", "parks", "buildings", "roads_major",
+    for k in ("land", "named", "water", "coastline", "parks", "buildings", "roads_major",
               "roads_minor", "rail"):
         print(f"  {k}: {len(out[k])}", flush=True)
 

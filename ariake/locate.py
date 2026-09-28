@@ -1,11 +1,14 @@
-"""各スポットの実際の位置を OpenStreetMap から取り、config.py の座標と突き合わせる。
+"""スポットの座標を、地図に描いている建物の輪郭に合わせる。
 
-config.py の緯度経度は手入力の4桁 (緯度で約11m、経度で約9m の刻み) なので、
-地図を拡大すると建物とマーカーがずれる。ここで実測値と比べて、ずれている
-ものを見つけ、貼り付けられる形で出力する。
+config.py の緯度経度は手入力の4桁で、実際の建物と最大1km ずれていた。
+地図を拡大すると、マーカーが更地に浮いて見える。
+
+合わせ先は basemap.json の `named` (地図として描いている輪郭そのものに
+名前を付けたもの)。印と建物が同じ出どころになるので、原理的にずれない。
+Overpass には問い合わせないので、混雑で失敗することもない。
 
     python ariake/locate.py          # ずれを一覧する
-    python ariake/locate.py --patch  # config.py の座標を実測値で書き換える
+    python ariake/locate.py --patch  # config.py の座標を書き換える
 
 名前で引き当てられなかったものは触らない (誤った場所に動かさないため)。
 """
@@ -13,237 +16,72 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
-import time
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ariake.config import SPOTS  # noqa: E402
 
-# 公式インスタンスは混むと 504 を返すので、いくつか回す
-OVERPASS = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-]
-CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG = os.path.join(HERE, "config.py")
+BASEMAP = os.path.join(os.path.dirname(HERE), "designs", "basemap.json")
 
-# 有明・豊洲・お台場を含む範囲 (南, 西, 北, 東)
-BBOX = (35.6050, 139.7600, 35.6700, 139.8150)
-
-# OSM 上の名前が config と違うもの、名前だけでは引けないものを補う。
-# 値は (OSM で探す名前, 種別の絞り込み) 。None は名前をそのまま使う。
-ALIASES: dict[str, str] = {
-    "bigsight": "東京ビッグサイト",
-    "shiki_ariake": "有明四季劇場",
-    "izumi_spa": "泉天空の湯 有明ガーデン",
-    "aeon_ariake": "イオンスタイル有明ガーデン",
-    "aeon_shinonome": "イオン東雲店",
-    "toyosu_market": "豊洲市場",
-    "lalaport_toyosu": "アーバンドック ららぽーと豊洲",
-    "kidzania": "キッザニア東京",
-    "teamlab_planets": "チームラボプラネッツ TOKYO DMM",
-    "miraikan": "日本科学未来館",
-    "fujitv": "フジテレビジョン",
-    "aquacity": "アクアシティお台場",
-    "decks": "デックス東京ビーチ",
-    "cruise_terminal": "東京国際クルーズターミナル",
-    "odaiba_beach": "お台場海浜公園",
-    "shiokaze": "潮風公園",
-    "toyosu_gururi": "豊洲ぐるり公園",
-    "ganken_ariake": "がん研究会有明病院",
-    "ariake_sports": "有明スポーツセンター",
-    "ariake_tennis_forest": "有明テニスの森公園",
-    "st_tokyo_bigsight": "東京ビッグサイト",
-    "st_kokusai_tenjijo": "国際展示場",
-    "st_ariake": "有明",
-    "st_ariake_tennis": "有明テニスの森",
+# basemap.json 上の名前が config と違うもの。
+# 値は (探す名前, 最低限の広さ m2)。広さは同名の小さな別棟を弾くために使う。
+MATCH: dict[str, tuple[str, int]] = {
+    "bigsight": ("東京ビッグサイト", 20000),
+    "ariake_arena": ("有明アリーナ", 8000),
+    "ariake_coliseum": ("有明コロシアム", 8000),
+    "garden_theater": ("東京ガーデンシアター", 3000),
+    "shiki_ariake": ("有明四季劇場", 1500),
+    "gymex": ("有明GYM-EX", 1500),
+    "ariake_garden": ("有明ガーデン", 5000),
+    "ariake_tennis_forest": ("有明テニスの森", 0),
+    "ariake_sports": ("有明スポーツセンター", 1500),
+    "ganken_ariake": ("がん研", 5000),
+    "izumi_spa": ("泉天空の湯", 0),
+    "aeon_ariake": ("イオンスタイル", 0),
+    "aeon_shinonome": ("イオン", 3000),
+    "toyosu_market": ("豊洲市場", 10000),
+    "lalaport_toyosu": ("ららぽーと豊洲", 10000),
+    "kidzania": ("キッザニア", 0),
+    "teamlab_planets": ("チームラボ", 0),
+    "miraikan": ("日本科学未来館", 3000),
+    "fujitv": ("フジテレビ", 3000),
+    "aquacity": ("アクアシティ", 5000),
+    "decks": ("デックス東京ビーチ", 5000),
+    "cruise_terminal": ("東京国際クルーズターミナル", 0),
+    "odaiba_beach": ("お台場海浜公園", 0),
+    "shiokaze": ("潮風公園", 0),
+    "toyosu_gururi": ("豊洲ぐるり公園", 0),
 }
 
 
-def query() -> str:
-    """範囲内の「名前が付いているもの」を一度に全部取る。
-
-    名前ごとに正規表現で引くと Overpass 側が重くなって時間切れになるので、
-    問い合わせは1回だけにして、名前の突き合わせは手元でやる。
-    """
-    s, w, n, e = BBOX
-    box = f"({s},{w},{n},{e})"
-    return (
-        "[out:json][timeout:180];("
-        f'way["name"]{box};'
-        f'relation["name"]{box};'
-        f'node["name"]["railway"="station"]{box};'
-        f'node["name"]["amenity"]{box};'
-        f'node["name"]["shop"]{box};'
-        f'node["name"]["leisure"]{box};'
-        f'node["name"]["tourism"]{box};'
-        ");out geom tags;"
-    )
-
-
-def fetch(q: str) -> dict:
-    last = None
-    for attempt in range(6):
-        url = OVERPASS[attempt % len(OVERPASS)]
-        req = urllib.request.Request(
-            url, data=("data=" + q).encode("utf-8"),
-            headers={"User-Agent": "ariake-monitor/1.0 (locate)"})
-        try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except Exception as exc:                      # noqa: BLE001
-            last = exc
-            print(f"  再試行 {attempt + 1} ({url.split('/')[2]}): {exc}", flush=True)
-            time.sleep(6 * (attempt + 1))
-    raise RuntimeError(f"Overpass に繋がらない: {last}")
-
-
-def poly(el: dict) -> list[tuple[float, float]] | None:
-    """要素の輪郭を (緯度, 経度) の並びで返す。"""
-    if el["type"] == "way" and el.get("geometry"):
-        return [(g["lat"], g["lon"]) for g in el["geometry"]]
-    if el["type"] == "relation":
-        pts: list[tuple[float, float]] = []
-        for m in el.get("members", []):
-            if m.get("geometry"):
-                pts += [(g["lat"], g["lon"]) for g in m["geometry"]]
-        return pts or None
-    return None
-
-
-def centre(el: dict) -> tuple[float, float] | None:
-    """代表点。面は重心を使う。
-
-    Overpass の out center は外接矩形の中心なので、L字や中庭のある建物だと
-    建物の外に落ちる。実際の輪郭から重心を出し、重心が輪郭の外に出る形
-    (コの字など) では輪郭の平均点に逃がす。
-    """
-    if el["type"] == "node":
-        return el["lat"], el["lon"]
-    ring = poly(el)
-    if not ring or len(ring) < 3:
-        return None
-    a = 0.0; cy = 0.0; cx = 0.0
-    for i in range(len(ring)):
-        y0, x0 = ring[i]; y1, x1 = ring[(i + 1) % len(ring)]
-        f = x0 * y1 - x1 * y0
-        a += f; cx += (x0 + x1) * f; cy += (y0 + y1) * f
-    if abs(a) < 1e-12:
-        return (sum(p[0] for p in ring) / len(ring),
-                sum(p[1] for p in ring) / len(ring))
-    c = (cy / (3 * a), cx / (3 * a))
-    if not point_in(c, ring):
-        return (sum(p[0] for p in ring) / len(ring),
-                sum(p[1] for p in ring) / len(ring))
-    return c
-
-
-def point_in(pt: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
-    y, x = pt; ins = False; n = len(ring); j = n - 1
-    for i in range(n):
-        yi, xi = ring[i]; yj, xj = ring[j]
-        if ((yi > y) != (yj > y)) and \
-                (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi):
-            ins = not ins
-        j = i
-    return ins
-
-
-def span_m(el: dict) -> float:
-    """要素の大きさ (対角線の長さ)。同名の小さな注記より建物本体を選ぶため。"""
-    ring = poly(el)
-    if not ring:
-        return 0.0
-    lats = [p[0] for p in ring]; lngs = [p[1] for p in ring]
-    return metres((min(lats), min(lngs)), (max(lats), max(lngs)))
-
-
 def metres(a: tuple[float, float], b: tuple[float, float]) -> float:
-    import math
     dy = (a[0] - b[0]) * 111320
     dx = (a[1] - b[1]) * 111320 * math.cos(math.radians(a[0]))
     return math.hypot(dx, dy)
 
 
-def best(elements: list[dict], want: str, cur: tuple[float, float],
-         station: bool) -> dict | None:
-    """名前が完全に一致するもののうち、一番大きいものを選ぶ。
+def pick(named: list[dict], want: str, floor: int,
+         cur: tuple[float, float]) -> dict | None:
+    """名前を含む輪郭のうち、一番広いものを選ぶ。
 
-    今の座標が当てにならない (最大1km ずれている) ので、距離では選ばない。
-    同名が複数あるときは、注記や出入口ではなく施設本体を採るために
-    大きさで決める。候補が散らばっている場合は呼び出し側に知らせる。
+    今の座標は当てにならない (最大1km ずれている) ので、距離では選ばない。
+    ただし別の街の同名施設を掴まないよう、2km を超えるものは除く。
     """
-    cands = []
-    for el in elements:
-        tags = el.get("tags") or {}
-        nm = tags.get("name", "")
-        if nm != want and not (nm.startswith(want + ";") or nm.startswith(want + "（")):
-            continue
-        if station and tags.get("railway") != "station":
-            continue
-        if not station and tags.get("railway") == "station":
-            continue
-        p = centre(el)
-        if not p:
-            continue
-        cands.append({"p": p, "el": el, "span": span_m(el), "name": nm})
+    cands = [n for n in named
+             if want in n["name"] and n["m2"] >= floor
+             and metres(cur, (n["lat"], n["lng"])) < 2000]
     if not cands:
         return None
-    # 面 (way/relation) を点 (node) より優先し、その中で大きいものを採る。
-    # 同名の点は案内板や出入口であることが多く、施設本体ではないため。
-    cands.sort(key=lambda c: (0 if c["el"]["type"] in ("way", "relation") else 1,
-                              -c["span"]))
+    cands.sort(key=lambda n: -n["m2"])
     top = cands[0]
-    spread = max((metres(top["p"], c["p"]) for c in cands[1:]), default=0.0)
-    return {"ring": poly(top["el"]), "type": top["el"]["type"],
-            "lat": round(top["p"][0], 6), "lng": round(top["p"][1], 6),
-            "dist": metres(cur, top["p"]), "span": top["span"],
-            "n": len(cands), "spread": spread,
-            "osm": f"{top['el']['type']}/{top['el']['id']}", "name": top["name"]}
-
-
-def load_basemap() -> dict | None:
-    f = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "designs", "basemap.json")
-    try:
-        return json.load(open(f, encoding="utf-8"))
-    except Exception:                                 # noqa: BLE001
-        return None
-
-
-def ring_area_m2(ring: list[tuple[float, float]]) -> float:
-    import math
-    la = sum(p[0] for p in ring) / len(ring)
-    k = 111320 * math.cos(math.radians(la))
-    a = 0.0
-    for i in range(len(ring)):
-        y0, x0 = ring[i]; y1, x1 = ring[(i + 1) % len(ring)]
-        a += (x0 * k) * (y1 * 111320) - (x1 * k) * (y0 * 111320)
-    return abs(a) / 2
-
-
-def verify(hit: dict, base: dict | None) -> str:
-    """その点が実際の建物や公園の上に乗っているかを確かめる。
-
-    名前が合っているだけでは、案内板や別棟を掴んでいることがある。
-    手元に持っている OpenStreetMap の輪郭に当てて、建物か公園の中に
-    入っているものだけを信用する。入っていないものは動かさない。
-    """
-    if not base:
-        return "?"
-    pt = (hit["lat"], hit["lng"])
-    for ring in base["buildings"]:
-        r = [(q[1], q[0]) for q in ring]
-        if point_in(pt, r):
-            return f"建物{ring_area_m2(r):.0f}m2"
-    for ring in base["parks"]:
-        r = [(q[1], q[0]) for q in ring]
-        if point_in(pt, r):
-            return "公園"
-    return "なし"
+    return {"lat": top["lat"], "lng": top["lng"], "m2": top["m2"],
+            "kind": top["kind"], "name": top["name"], "n": len(cands),
+            "dist": metres(cur, (top["lat"], top["lng"]))}
 
 
 def main() -> None:
@@ -251,33 +89,29 @@ def main() -> None:
     ap.add_argument("--patch", action="store_true", help="config.py を書き換える")
     args = ap.parse_args()
 
-    targets = {sid: ALIASES.get(sid, sp["name"]) for sid, sp in SPOTS.items()
-               if sp.get("lat") and sp.get("lng")}
-    # 道路など、建物を持たないものは対象外
-    targets = {k: v for k, v in targets.items() if not k.startswith("road")}
+    base = json.load(open(BASEMAP, encoding="utf-8"))
+    named = base.get("named") or []
+    if not named:
+        print("basemap.json に名前付きの輪郭がありません。"
+              "先に basemap ワークフローを回してください。", flush=True)
+        raise SystemExit(1)
+    print(f"名前付きの輪郭 {len(named)} 件", flush=True)
 
-
-    print("Overpass 照会 (1回)", flush=True)
-    els = fetch(query()).get("elements", [])
-    print(f"  名前付き要素 {len(els)} 件", flush=True)
-
-    base = load_basemap()
     found: dict[str, dict] = {}
-    for sid, want in targets.items():
-        cur = (SPOTS[sid]["lat"], SPOTS[sid]["lng"])
-        hit = best(els, want, cur, sid.startswith("st_"))
+    for sid, (want, floor) in MATCH.items():
+        sp = SPOTS.get(sid)
+        if not sp or not sp.get("lat"):
+            continue
+        hit = pick(named, want, floor, (sp["lat"], sp["lng"]))
         if hit:
-            hit["on"] = verify(hit, base)
             found[sid] = hit
 
     print("\n--- ずれの大きい順 ---", flush=True)
-    rows = sorted(found.items(), key=lambda kv: -kv[1]["dist"])
-    for sid, h in rows:
-        warn = "  ※同名が散在" if h["spread"] > 300 else ""
+    for sid, h in sorted(found.items(), key=lambda kv: -kv[1]["dist"]):
         print(f"{h['dist']:7.1f}m  {sid:22s} {SPOTS[sid]['name']}"
-              f"  → {h['lat']}, {h['lng']}  幅{h['span']:.0f}m 候補{h['n']}"
-              f"  乗っている物:{h['on']}  [{h['osm']} {h['name']}]{warn}", flush=True)
-    missing = sorted(set(targets) - set(found))
+              f"  → {h['lat']}, {h['lng']}"
+              f"  {h['kind']}{h['m2']:,}m2 候補{h['n']}  [{h['name']}]", flush=True)
+    missing = sorted(set(MATCH) - set(found))
     if missing:
         print("\n見つからず (触らない): " + ", ".join(missing), flush=True)
 
@@ -286,16 +120,9 @@ def main() -> None:
 
     src = open(CONFIG, encoding="utf-8").read()
     changed = 0
-    skipped = []
     for sid, h in found.items():
         if h["dist"] < 5:                   # 5m 未満は誤差なので触らない
             continue
-        # 建物にも公園にも乗っていない点は信用しない。名前だけ合っている
-        # 案内板や別棟を掴んでいる可能性があるため、そのまま残す。
-        if h["on"] == "なし":
-            skipped.append(sid)
-            continue
-        # そのスポットの定義ブロックの中だけを書き換える
         m = re.search(r'("' + re.escape(sid) + r'":\s*\{)(.*?)(\n    \},)', src, re.S)
         if not m:
             print(f"  ブロックが見つからない: {sid}", flush=True)
@@ -308,8 +135,6 @@ def main() -> None:
             changed += 1
     open(CONFIG, "w", encoding="utf-8").write(src)
     print(f"\nconfig.py を更新: {changed} 件", flush=True)
-    if skipped:
-        print("建物にも公園にも乗らないので見送り: " + ", ".join(skipped), flush=True)
 
 
 if __name__ == "__main__":
