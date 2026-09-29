@@ -83,7 +83,7 @@ SPOTS: dict[str, dict] = {
     },
     "izumi_spa": {
         "name": "泉天空の湯 有明ガーデン", "kind": "facility",
-        "lat": 35.638418, "lng": 139.79307, "capacity": 2000, "scale": 1200,
+        "lat": 35.638271, "lng": 139.791547, "capacity": 2000, "scale": 1200,
         "baseline_scale": 0.7, "spillover_scale": 0.4,
         "place_query": "泉天空の湯 有明ガーデン",
         "place_address": "東京都江東区有明2-1-7",
@@ -97,7 +97,7 @@ SPOTS: dict[str, dict] = {
     },
     "ariake_sports": {
         "name": "有明スポーツセンター", "kind": "facility",
-        "lat": 35.6380, "lng": 139.7930, "capacity": 2000, "scale": 1200,
+        "lat": 35.63317, "lng": 139.783725, "capacity": 2000, "scale": 1200,
         "baseline_scale": 0.5, "spillover_scale": 0.25,
         "place_query": "東京都 有明スポーツセンター",
         "place_address": "東京都江東区有明1-11-1",
@@ -117,13 +117,13 @@ SPOTS: dict[str, dict] = {
     },
     "kidzania": {
         "name": "キッザニア東京", "kind": "facility",
-        "lat": 35.6553, "lng": 139.7921, "capacity": 3000, "scale": 1500,
+        "lat": 35.655396, "lng": 139.792294, "capacity": 3000, "scale": 1500,
         "spillover_scale": 0.3,
         "place_query": "キッザニア東京", "place_address": "東京都江東区豊洲2-4-9",
     },
     "teamlab_planets": {
         "name": "チームラボプラネッツ TOKYO", "kind": "facility",
-        "lat": 35.6488, "lng": 139.7900, "capacity": 6000, "scale": 2500,
+        "lat": 35.649274, "lng": 139.78971, "capacity": 6000, "scale": 2500,
         "place_query": "チームラボプラネッツ TOKYO",
         "place_address": "東京都江東区豊洲6-1-16",
     },
@@ -156,13 +156,13 @@ SPOTS: dict[str, dict] = {
     },
     "odaiba_beach": {
         "name": "お台場海浜公園", "kind": "facility",
-        "lat": 35.6310, "lng": 139.7740, "capacity": 20000, "scale": 5000,
+        "lat": 35.631079, "lng": 139.773665, "capacity": 20000, "scale": 5000,
         "baseline_scale": 0.55, "place_query": "お台場海浜公園",
         "place_address": "東京都港区台場1-4",
     },
     "shiokaze": {
         "name": "潮風公園", "kind": "facility",
-        "lat": 35.6250, "lng": 139.7720, "capacity": 8000, "scale": 3000,
+        "lat": 35.62266, "lng": 139.769984, "capacity": 8000, "scale": 3000,
         "baseline_scale": 0.35, "place_query": "潮風公園",
         "place_address": "東京都品川区東八潮1-2",
     },

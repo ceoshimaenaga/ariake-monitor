@@ -53,10 +53,16 @@ MATCH: dict[str, tuple[str, int]] = {
     "toyosu_gururi": ("豊洲ぐるり公園", 0),
     # キッザニア東京はららぽーと豊洲の建物の中にある施設なので、同じ建物に合わせる
     "kidzania": ("ららぽーと豊洲", 10000),
-    # 以下は OSM に名前付きの輪郭が無いので、ここでは触らない:
-    #   有明スポーツセンター / 有明GYM-EX / 有明四季劇場 / 泉天空の湯 /
-    #   イオンスタイル有明ガーデン / チームラボプラネッツ /
-    #   東京国際クルーズターミナル / お台場海浜公園 / 潮風公園
+    "ariake_sports": ("有明スポーツセンター", 1000),
+    "teamlab_planets": ("チームラボ プラネッツ", 1000),
+    "izumi_spa": ("泉天空の湯", 1000),
+    "aeon_ariake": ("イオンスタイル", 5000),
+    "odaiba_beach": ("お台場海浜公園", 0),
+    "shiokaze": ("潮風公園", 0),
+    # 以下は OSM に名前が見つからないので触らない:
+    #   有明GYM-EX / 有明四季劇場 / 東京国際クルーズターミナル
+    #   (クルーズターミナルは近くに "青海客船ターミナル" があるが、
+    #    同じものか確かめられないので動かさない)
 }
 
 
@@ -266,7 +272,15 @@ def pick(named: list[dict], want: str, floor: int,
     cands = [n for n in near if n["m2"] >= floor] or near
     if not cands:
         return None
-    cands.sort(key=lambda n: -n["m2"])
+    # 300m2 未満の輪郭は、施設本体ではなく案内板やトイレのことが多い。
+    # 広さの手がかりとしては点と同じ扱いにして、公園 → 点 → 建物 の順で選ぶ。
+    # 名前が完全に一致するものを最優先にする。部分一致だけで大きさ順に
+    # 選ぶと、"イオン" が有明のイオンスタイルを、"会議棟" が会議棟地下
+    # 駐車場を、"潮風公園" が潮風公園案内図を掴んでしまう。
+    rank = {"park": 0, "point": 1, "building": 2}
+    cands.sort(key=lambda n: (0 if n["name"] == want else 1,
+                              -(n["m2"] if n["m2"] >= 300 else 0),
+                              rank.get(n["kind"], 3)))
     top = cands[0]
     return {"lat": top["lat"], "lng": top["lng"], "m2": top["m2"],
             "kind": top["kind"], "name": top["name"], "n": len(cands),
