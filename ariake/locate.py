@@ -77,11 +77,20 @@ def fetch_names(bbox: list[float]) -> list[dict]:
     """
     w, s_, e, n = bbox[0], bbox[1], bbox[2], bbox[3]
     box = f"({s_},{w},{n},{e})"
-    q = ("[out:json][timeout:120];("
+    # 施設は建物として描かれているとは限らず、建物の中の点 (POI) として
+    # 登録されていることが多い。劇場やジムや温浴施設はたいていこちら。
+    # 点も取って、あとで建物の輪郭に吸着させる。
+    q = ("[out:json][timeout:150];("
          f'way["name"]["building"]{box};'
          f'relation["name"]["building"]{box};'
-         f'way["name"]["leisure"="park"]{box};'
-         f'relation["name"]["leisure"="park"]{box};'
+         f'way["name"]["leisure"]{box};'
+         f'relation["name"]["leisure"]{box};'
+         f'node["name"]["amenity"]{box};'
+         f'node["name"]["shop"]{box};'
+         f'node["name"]["leisure"]{box};'
+         f'node["name"]["tourism"]{box};'
+         f'node["name"]["office"]{box};'
+         f'node["name"]["building"]{box};'
          ");out center tags;")
     last = None
     for rnd in range(3):
@@ -159,15 +168,21 @@ def attach_names(base: dict) -> list[dict]:
         if not c:
             continue
         pt = (c["lat"], c["lon"])
+        # その点を含む輪郭 → 近くの輪郭 → どれにも当たらなければ点そのもの。
+        # 当たらないものを捨てると、建物として描かれていない施設 (公園の
+        # 相手や埠頭の施設など) が永久に直らないので、点のまま残す。
         hit = next((t for t in rings if inside(pt, t[0])), None)
         if hit is None:
             near = min(rings, key=lambda t: metres(pt, t[1]), default=None)
-            if near is None or metres(pt, near[1]) > 80:
-                continue
-            hit = near
-        out.append({"name": nm, "kind": hit[3],
-                    "lat": round(hit[1][0], 6), "lng": round(hit[1][1], 6),
-                    "m2": round(hit[2])})
+            if near is not None and metres(pt, near[1]) <= 60:
+                hit = near
+        if hit is None:
+            out.append({"name": nm, "kind": "point",
+                        "lat": round(pt[0], 6), "lng": round(pt[1], 6), "m2": 0})
+        else:
+            out.append({"name": nm, "kind": hit[3],
+                        "lat": round(hit[1][0], 6), "lng": round(hit[1][1], 6),
+                        "m2": round(hit[2])})
     return out
 
 
@@ -184,9 +199,11 @@ def pick(named: list[dict], want: str, floor: int,
     今の座標は当てにならない (最大1km ずれている) ので、距離では選ばない。
     ただし別の街の同名施設を掴まないよう、2km を超えるものは除く。
     """
-    cands = [n for n in named
-             if want in n["name"] and n["m2"] >= floor
-             and metres(cur, (n["lat"], n["lng"])) < 2000]
+    near = [n for n in named
+            if want in n["name"] and metres(cur, (n["lat"], n["lng"])) < 2000]
+    # 広さの下限は、面のある候補を選り分けるためのもの。面がある候補が
+    # 一つも残らないなら、点として登録されている施設なので下限は外す。
+    cands = [n for n in near if n["m2"] >= floor] or near
     if not cands:
         return None
     cands.sort(key=lambda n: -n["m2"])
