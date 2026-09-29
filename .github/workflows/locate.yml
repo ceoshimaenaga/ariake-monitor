@@ -37,8 +37,10 @@ jobs:
           [ "$PATCH" = "true" ] && ARGS="$ARGS --patch"
           python ariake/locate.py $ARGS
 
+      # 名前を取り直したときは、patch しなくても basemap.json を残す。
+      # 取った名前を捨ててしまうと、名寄せを直すたびに取り直しになるため。
       - name: Commit config.py
-        if: ${{ inputs.patch }}
+        if: ${{ inputs.patch || inputs.fetch_names }}
         run: |
           git config user.name "ariake-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -46,7 +48,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "変更なし"
           else
-            git commit -m "fix(ariake): スポットの座標を OpenStreetMap の実測値に合わせる"
+            git commit -m "chore(ariake): 座標と名前付き輪郭を更新する"
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
             git push
           fi
