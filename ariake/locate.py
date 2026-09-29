@@ -51,9 +51,11 @@ MATCH: dict[str, tuple[str, int]] = {
     "aquacity": ("アクアシテイ", 5000),      # OSM 上の表記ゆれ (シテイ)
     "decks": ("デックス東京ビーチ", 5000),
     "toyosu_gururi": ("豊洲ぐるり公園", 0),
+    # キッザニア東京はららぽーと豊洲の建物の中にある施設なので、同じ建物に合わせる
+    "kidzania": ("ららぽーと豊洲", 10000),
     # 以下は OSM に名前付きの輪郭が無いので、ここでは触らない:
     #   有明スポーツセンター / 有明GYM-EX / 有明四季劇場 / 泉天空の湯 /
-    #   イオンスタイル有明ガーデン / キッザニア東京 / チームラボプラネッツ /
+    #   イオンスタイル有明ガーデン / チームラボプラネッツ /
     #   東京国際クルーズターミナル / お台場海浜公園 / 潮風公園
 }
 
@@ -66,6 +68,35 @@ ENDPOINTS = [
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.osm.jp/api/interpreter",
 ]
+
+
+def fetch_some(bbox: list[float], names: list[str]) -> list[dict]:
+    """名前を指定して、その施設だけを引く。
+
+    範囲内の名前付きを全部取る問い合わせは、Overpass が混んでいると
+    いつまでも返ってこない。残り数件を埋めるだけなら、名前で絞った方が
+    圧倒的に軽い。点でも面でも拾う。
+    """
+    w, s_, e, n = bbox[0], bbox[1], bbox[2], bbox[3]
+    box = f"({s_},{w},{n},{e})"
+    pat = "|".join(x.replace('"', '\\"') for x in names)
+    q = (f'[out:json][timeout:120];nwr["name"~"{pat}"]{box};out center tags;')
+    last = None
+    for rnd in range(3):
+        for url in ENDPOINTS:
+            try:
+                print(f"  名前で照会 ({rnd + 1}周目): {url}", flush=True)
+                req = urllib.request.Request(
+                    url, data=("data=" + q).encode("utf-8"),
+                    headers={"User-Agent": "ariake-monitor/1.0 (locate)"})
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    return json.loads(r.read().decode("utf-8")).get("elements", [])
+            except Exception as exc:                      # noqa: BLE001
+                print(f"  ! {exc}", flush=True)
+                last = exc
+        if rnd < 2:
+            time.sleep(15 * (rnd + 1))
+    raise SystemExit(f"名前を取得できませんでした: {last}")
 
 
 def fetch_names(bbox: list[float]) -> list[dict]:
@@ -146,6 +177,35 @@ def ring_m2(ring: list[list[float]]) -> float:
     return abs(a) / 2
 
 
+def snap(base: dict, els: list[dict]) -> list[dict]:
+    """取ってきた要素を、手元の輪郭に吸着させる (fetch と分けてある)。"""
+    rings = [(r, ring_centre(r), ring_m2(r), "building") for r in base["buildings"]]
+    rings += [(r, ring_centre(r), ring_m2(r), "park") for r in base["parks"]]
+    out = []
+    for el in els:
+        nm = (el.get("tags") or {}).get("name")
+        if not nm:
+            continue
+        c = el.get("center") or ({"lat": el.get("lat"), "lon": el.get("lon")}
+                                 if el.get("lat") else None)
+        if not c:
+            continue
+        pt = (c["lat"], c["lon"])
+        hit = next((t for t in rings if inside(pt, t[0])), None)
+        if hit is None:
+            near = min(rings, key=lambda t: metres(pt, t[1]), default=None)
+            if near is not None and metres(pt, near[1]) <= 60:
+                hit = near
+        if hit is None:
+            out.append({"name": nm, "kind": "point",
+                        "lat": round(pt[0], 6), "lng": round(pt[1], 6), "m2": 0})
+        else:
+            out.append({"name": nm, "kind": hit[3],
+                        "lat": round(hit[1][0], 6), "lng": round(hit[1][1], 6),
+                        "m2": round(hit[2])})
+    return out
+
+
 def attach_names(base: dict) -> list[dict]:
     """取ってきた名前を、手元の輪郭に貼り付ける。
 
@@ -218,11 +278,25 @@ def main() -> None:
     ap.add_argument("--patch", action="store_true", help="config.py を書き換える")
     ap.add_argument("--fetch-names", action="store_true",
                     help="名前を取り直して basemap.json に貼り付ける")
+    ap.add_argument("--find", default="",
+                    help="この名前 (| 区切り) だけを引いて basemap.json に足す")
     args = ap.parse_args()
 
     base = json.load(open(BASEMAP, encoding="utf-8"))
     named = base.get("named") or []
-    if args.fetch_names or not named:
+    if args.find:
+        got = snap(base, fetch_some(base["bbox"], args.find.split("|")))
+        have = {(x["name"], x["lat"], x["lng"]) for x in named}
+        add = [g for g in got if (g["name"], g["lat"], g["lng"]) not in have]
+        for g in sorted(add, key=lambda x: -x["m2"]):
+            print(f"  + {g['name'][:34]:36s} {g['kind']:8s} {g['m2']:>8,} "
+                  f"{g['lat']},{g['lng']}", flush=True)
+        named += add
+        base["named"] = named
+        json.dump(base, open(BASEMAP, "w", encoding="utf-8"),
+                  ensure_ascii=False, separators=(",", ":"))
+        print(f"basemap.json に追加: {len(add)} 件", flush=True)
+    elif args.fetch_names or not named:
         named = attach_names(base)
         base["named"] = named
         json.dump(base, open(BASEMAP, "w", encoding="utf-8"),

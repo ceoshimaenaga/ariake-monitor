@@ -14,6 +14,10 @@ on:
         description: "名前を取り直して basemap.json に貼り付ける"
         type: boolean
         default: false
+      find:
+        description: "この名前だけを引く (| 区切り)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -31,8 +35,10 @@ jobs:
         env:
           PATCH: ${{ inputs.patch }}
           FETCH: ${{ inputs.fetch_names }}
+          FIND: ${{ inputs.find }}
         run: |
           ARGS=""
+          [ -n "$FIND" ] && ARGS="$ARGS --find $FIND"
           [ "$FETCH" = "true" ] && ARGS="$ARGS --fetch-names"
           [ "$PATCH" = "true" ] && ARGS="$ARGS --patch"
           python ariake/locate.py $ARGS
@@ -40,7 +46,7 @@ jobs:
       # 名前を取り直したときは、patch しなくても basemap.json を残す。
       # 取った名前を捨ててしまうと、名寄せを直すたびに取り直しになるため。
       - name: Commit config.py
-        if: ${{ inputs.patch || inputs.fetch_names }}
+        if: ${{ inputs.patch || inputs.fetch_names || inputs.find != '' }}
         run: |
           git config user.name "ariake-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
