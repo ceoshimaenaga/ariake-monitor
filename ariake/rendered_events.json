@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-16T13:29:29+09:00",
+ "generated_at": "2026-10-16T20:20:32+09:00",
  "events": [
   {
    "venue": "ariake_arena",
@@ -59,7 +59,7 @@
    "url": "https://toki-sen.com/",
    "start_date": "2026-10-24",
    "end_date": "2026-10-24",
-   "open_time": "16:00",
+   "open_time": "15:00",
    "start_time": "17:00",
    "end_time": "19:00",
    "est_attendance": 10000,
