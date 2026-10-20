@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-20T07:20:51+09:00",
+ "generated_at": "2026-10-20T13:47:14+09:00",
  "events": [
   {
    "venue": "ariake_arena",
@@ -90,6 +90,19 @@
    "end_time": "20:30",
    "est_attendance": 10000,
    "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "shiki_ariake",
+   "title": "劇場チケットボックス",
+   "url": "http://www.shiki.jp/ticketbox/",
+   "start_date": "2026-12-09",
+   "end_date": "2026-12-09",
+   "open_time": null,
+   "start_time": "12:30",
+   "end_time": "16:00",
+   "est_attendance": 600,
+   "scale_label": "推定 (定員の50%)",
    "source": "rendered"
   }
  ]
