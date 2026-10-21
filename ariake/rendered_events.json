@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-21T20:45:54+09:00",
+ "generated_at": "2026-10-22T02:10:17+09:00",
  "events": [
   {
    "venue": "ariake_arena",
@@ -54,6 +54,19 @@
    "source": "rendered"
   },
   {
+   "venue": "shiki_ariake",
+   "title": "以降劇団四季idセンターがご利用いただけるようになるまでの間、ご予約いただいている公演の入場時のチケットQRにつきましては、ご予約いただいたお客様のメールアドレス宛にPDFにてお送りさせていただきます。",
+   "url": "https://www.shiki.jp/theatres/4026/",
+   "start_date": "2026-10-22",
+   "end_date": "2026-10-22",
+   "open_time": null,
+   "start_time": "12:30",
+   "end_time": "16:00",
+   "est_attendance": 1020,
+   "scale_label": "公演 (会場定員基準)",
+   "source": "rendered"
+  },
+  {
    "venue": "ariake_arena",
    "title": "超ときめき♡宣伝部",
    "url": "https://toki-sen.com/",
@@ -90,19 +103,6 @@
    "end_time": "20:30",
    "est_attendance": 10000,
    "scale_label": "推定 (会場の平均的な規模)",
-   "source": "rendered"
-  },
-  {
-   "venue": "shiki_ariake",
-   "title": "劇場チケットボックス",
-   "url": "http://www.shiki.jp/ticketbox/",
-   "start_date": "2026-12-09",
-   "end_date": "2026-12-09",
-   "open_time": null,
-   "start_time": "12:30",
-   "end_time": "16:00",
-   "est_attendance": 600,
-   "scale_label": "推定 (定員の50%)",
    "source": "rendered"
   }
  ]
