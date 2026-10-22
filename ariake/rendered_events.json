@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-22T06:41:15+09:00",
+ "generated_at": "2026-10-22T13:41:00+09:00",
  "events": [
   {
    "venue": "ariake_arena",
@@ -103,6 +103,32 @@
    "end_time": "20:30",
    "est_attendance": 10000,
    "scale_label": "推定 (会場の平均的な規模)",
+   "source": "rendered"
+  },
+  {
+   "venue": "shiki_ariake",
+   "title": "13:30開演 初日公演",
+   "url": "https://s.shiki.jp/m/cats_f_20270218_e",
+   "start_date": "2027-02-18",
+   "end_date": "2027-02-18",
+   "open_time": null,
+   "start_time": "13:30",
+   "end_time": "16:00",
+   "est_attendance": 1020,
+   "scale_label": "公演 (会場定員基準)",
+   "source": "rendered"
+  },
+  {
+   "venue": "shiki_ariake",
+   "title": "～5月5日(水・祝)の土日祝公演",
+   "url": "https://s.shiki.jp/m/cats_f_202702_05_e",
+   "start_date": "2027-02-20",
+   "end_date": "2027-05-05",
+   "open_time": null,
+   "start_time": "12:30",
+   "end_time": "16:00",
+   "est_attendance": 1020,
+   "scale_label": "公演 (会場定員基準)",
    "source": "rendered"
   }
  ]
