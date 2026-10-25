@@ -24,8 +24,10 @@ ASSETS = [
     ("ariake-common.js", "ariake-common.js"),
     ("ariake-settings.js", "ariake-settings.js"),
     ("ariake.json", "ariake.json"),
-    ("designs/basemap.json", "basemap.json"),
 ]
+# 配信しないもの。named は座標合わせ (locate.py) にしか使わないのに
+# 146KB あり、地図ページは読んでいない。全訪問者に配る理由がない。
+BASEMAP_DROP = ("named",)
 ASSET_DIRS = [("designs/icons/png", "icons/png")]
 
 
@@ -57,6 +59,16 @@ def main() -> None:
 
     for src, dst in ASSETS:
         shutil.copy2(os.path.join(ROOT, src), os.path.join(OUT, dst))
+
+    # 基盤地図は、配信に要らない部分を落としてから置く
+    import json
+    with open(os.path.join(ROOT, "designs/basemap.json"), encoding="utf-8") as f:
+        base = json.load(f)
+    dropped = sum(len(json.dumps(base.pop(k, []), ensure_ascii=False).encode())
+                  for k in BASEMAP_DROP)
+    with open(os.path.join(OUT, "basemap.json"), "w", encoding="utf-8") as f:
+        json.dump(base, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"basemap.json: 配信に不要な {dropped / 1024:.0f} KB を落とした", flush=True)
     for src, dst in ASSET_DIRS:
         shutil.copytree(os.path.join(ROOT, src), os.path.join(OUT, dst))
 

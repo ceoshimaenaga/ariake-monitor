@@ -7,8 +7,10 @@ name: ariake-render
 # イベントスケジュールは1日に何度も変わるものではないので、これで十分。
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
+  # 【定期実行は停止中】イベント表の読み取りも RTX 機が担当する
+  # (python local\refresh.py --render)。手元を止めるときはコメントを外す。
+  # schedule:
+  #   - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
