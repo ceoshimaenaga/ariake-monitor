@@ -3,9 +3,12 @@ name: collect
 # 有明エリアの混雑データを毎時収集し、ariake.json を更新してコミットする。
 # コミットが main に載ると pages ワークフローが走り、公開ページが最新化される。
 
+# 【定期実行は停止中】収集は RTX 機 (local/refresh.py) が毎時おこなう。
+# 両方が動くと ariake.json を取り合うため、こちらは手動のときだけ。
+# 手元の PC を止めてクラウドに戻すときは、下の schedule のコメントを外す。
 on:
-  schedule:
-    - cron: "7 * * * *"
+  # schedule:
+  #   - cron: "7 * * * *"
   workflow_dispatch:
 
 permissions:
