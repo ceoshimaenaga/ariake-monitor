@@ -3,6 +3,7 @@
 最終更新: 2026-10-25 ／ 公開ページ: https://ceoshimaenaga.github.io/ariake-monitor/
 
 このファイルだけ読めば、RTX機で全部動かせるようにしてある。
+**なぜそうなっているか**（判断の経緯・捨てた案・踏んだ失敗）は [CONTEXT.md](CONTEXT.md) に別途ある。
 
 ---
 
