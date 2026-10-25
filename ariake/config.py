@@ -168,7 +168,7 @@ SPOTS: dict[str, dict] = {
     },
     "cruise_terminal": {
         "name": "東京国際クルーズターミナル", "kind": "facility",
-        "lat": 35.6180, "lng": 139.7720, "capacity": 5000, "scale": 2000,
+        "lat": 35.617491, "lng": 139.771277, "capacity": 5000, "scale": 2000,
         "baseline_scale": 0.3, "spillover_scale": 0.3,
         "place_query": "東京国際クルーズターミナル",
         "place_address": "東京都江東区青海2-6-3",
