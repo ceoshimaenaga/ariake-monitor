@@ -56,6 +56,8 @@ python -m http.server -d _site
 
 ## 手元の PC だけで動かす
 
+→ 引き継ぎの詳細は **[HANDOVER.md](HANDOVER.md)** にまとめてある。
+
 収集・予測・サイトの組み立て・開発まで、すべて1台で完結する。
 機械学習は使っていないので GPU は要らない (依存は requests / beautifulsoup4 /
 feedparser と標準ライブラリだけ)。
