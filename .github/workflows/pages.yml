@@ -15,7 +15,10 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # 立て続けに push すると、走っている最中のビルドが止められ、
+  # 成果物が無いまま deploy 段だけが動いて失敗する (エラーメールが連続する)。
+  # Pages は中断せず順に出すのが正しい。
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -33,10 +36,9 @@ jobs:
       - name: Build _site
         run: python ariake/build_site.py
 
-      # enablement: true で Pages 自体もここで有効化する (設定画面を触らずに済む)
+      # enablement: true は権限不足で落ちることがあり、Pages は既に
+      # 設定画面で有効にしてあるので指定しない
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
