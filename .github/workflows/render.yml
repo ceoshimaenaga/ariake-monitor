@@ -6,11 +6,10 @@ name: ariake-render
 # ブラウザ起動は重いので毎時の収集(ariake.yml)とは分離し、6時間おきに実行する。
 # イベントスケジュールは1日に何度も変わるものではないので、これで十分。
 
+# RTX 機が実際に動き出すまでは止めない (collect.yml と同じ理由)。
 on:
-  # 【定期実行は停止中】イベント表の読み取りも RTX 機が担当する
-  # (python local\refresh.py --render)。手元を止めるときはコメントを外す。
-  # schedule:
-  #   - cron: "17 */6 * * *"
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
