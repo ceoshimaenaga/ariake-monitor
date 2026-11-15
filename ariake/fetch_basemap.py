@@ -64,6 +64,11 @@ def query(b: tuple[float, float, float, float]) -> str:
   way["leisure"="park"]({box});
   way["landuse"~"^(grass|forest|recreation_ground)$"]({box});
   way["leisure"="pitch"]({box});
+  // 大きな公園や水域は、複数の線を組み合わせた relation (multipolygon) で
+  // 登録されていることがある。way だけ取ると輪郭が丸ごと落ちる。
+  relation["leisure"="park"]({box});
+  relation["landuse"~"^(grass|forest|recreation_ground)$"]({box});
+  relation["natural"="water"]({box});
   way["building"]({box});
   way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|secondary|tertiary|residential|unclassified)$"]({box});
   way["railway"~"^(rail|light_rail|monorail|subway)$"]({box});
@@ -104,6 +109,49 @@ def line(geom: list[dict]) -> list[list[float]]:
         if not out or out[-1] != c:
             out.append(c)
     return out
+
+
+def rings_of(el: dict) -> list[list[list[float]]]:
+    """relation (multipolygon) の外周を、閉じた輪郭の並びにして返す。
+
+    OSM の大きな公園は、輪郭が何本もの線に分かれて登録されている。
+    端点が一致する線どうしを繋いで閉じるまで回し、閉じたものだけを採る。
+    穴 (inner) は取らない。池などは water として上から塗られるため。
+    """
+    parts: list[list[list[float]]] = []
+    for m in el.get("members", []):
+        if m.get("type") != "way" or not m.get("geometry"):
+            continue
+        if m.get("role") not in ("outer", "", None):
+            continue
+        pts = line(m["geometry"])
+        if len(pts) >= 2:
+            parts.append(pts)
+
+    rings: list[list[list[float]]] = []
+    while parts:
+        cur = parts.pop(0)
+        joined = True
+        while joined and cur[0] != cur[-1]:
+            joined = False
+            for i, nxt in enumerate(parts):
+                if cur[-1] == nxt[0]:
+                    cur = cur + nxt[1:]
+                elif cur[-1] == nxt[-1]:
+                    cur = cur + nxt[-2::-1]
+                elif cur[0] == nxt[-1]:
+                    cur = nxt[:-1] + cur
+                elif cur[0] == nxt[0]:
+                    cur = nxt[:0:-1] + cur
+                else:
+                    continue
+                parts.pop(i)
+                joined = True
+                break
+        # 閉じなかった断片は捨てる (開いた輪郭は面として塗れない)
+        if cur[0] == cur[-1] and len(cur) >= MIN_BUILDING_PTS + 1:
+            rings.append(cur[:-1])
+    return rings
 
 
 def note(out, tags, pts, kind):
@@ -288,9 +336,18 @@ def main() -> None:
 
     MAJOR = {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "secondary"}
     for el in els:
+        t = el.get("tags", {}) or {}
+
+        # relation は輪郭を組み立ててから、way と同じ扱いにする
+        if el.get("type") == "relation":
+            water = t.get("natural") == "water"
+            for ring in rings_of(el):
+                out["water" if water else "parks"].append(ring)
+                note(out, t, ring, "water" if water else "park")
+            continue
+
         if el.get("type") != "way" or not el.get("geometry"):
             continue
-        t = el.get("tags", {}) or {}
         pts = line(el["geometry"])
         if len(pts) < 2:
             continue
