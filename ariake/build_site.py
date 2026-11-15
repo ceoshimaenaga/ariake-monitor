@@ -24,6 +24,7 @@ ASSETS = [
     ("ariake-common.js", "ariake-common.js"),
     ("ariake-settings.js", "ariake-settings.js"),
     ("ariake.json", "ariake.json"),
+    ("offers.json", "offers.json"),
 ]
 # 配信しないもの。named は座標合わせ (locate.py) にしか使わないのに
 # 146KB あり、地図ページは読んでいない。全訪問者に配る理由がない。

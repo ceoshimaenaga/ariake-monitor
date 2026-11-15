@@ -163,6 +163,20 @@
     white-space:nowrap; }
   .ev.soon .when { color:var(--accent); font-weight:700; }
   .noev { color:var(--muted); font-size:12px; padding:10px 0; }
+  /* 混雑に合わせた案内。広告なので、広告と分かる形にする
+   * (景品表示法のステマ規制。隠すと違法) */
+  .offers { margin:18px 0 0; }
+  .offer { border:1px solid var(--line); border-radius:12px; padding:13px 15px;
+    margin-bottom:9px; background:var(--panel); }
+  .offer .hd { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
+  .offer .ad { font-size:10px; color:var(--muted); border:1px solid var(--line);
+    border-radius:4px; padding:1px 6px; flex:none; }
+  .offer b { font-size:13px; }
+  .offer p { margin:0 0 9px; font-size:12px; color:var(--sec); line-height:1.7; }
+  .offer a.cta { display:inline-block; font-size:12px; font-weight:700;
+    color:var(--accent); text-decoration:none; border:1px solid var(--accent);
+    border-radius:8px; padding:6px 14px; }
+  .offer .prov { font-size:10px; color:var(--muted); margin-left:10px; }
   /* 通信できていないときの帯。古いデータを黙って新しいふりで見せない */
   .stale { display:none; background:color-mix(in srgb, var(--warning) 18%, var(--panel));
     border:1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
@@ -223,6 +237,7 @@
   <table id="rank"></table>
   <h2 id="evttl">これからの予定</h2>
   <div id="events"></div>
+  <div class="offers" id="offers"></div>
   <footer id="foot"></footer>
 </div>
 <div class="a2hs" id="a2hs">
@@ -790,6 +805,88 @@ function esc(t) {
   });
 }
 
+/* --- 混雑に合わせた案内 (アフィリエイト) -------------------------------
+ * 広告を敷き詰めるのではなく、「その状況で実際に困ること」にだけ出す。
+ * 道が混む日に駐車場、終演前に飲食店、大型イベント前日に宿。
+ * 条件に当たらなければ何も出さない。
+ *
+ * 景品表示法のステルスマーケティング規制により、広告であることを
+ * 明示する必要がある。「広告」の表示は外さないこと。 */
+var OFFERS = null;
+fetch("offers.json").then(function (r) { return r.json(); })
+  .then(function (o) { OFFERS = o; if (window.DATA) drawOffers(window.DATA); })
+  .catch(function () { /* 無くても本体は動く */ });
+
+/* その条件に当てはまるか。使えるのは手元のデータだけで、
+ * 閲覧者を追跡したり、外部に何かを送ったりはしない。 */
+function offerMatches(w, d, hour) {
+  if (!w || !w.type) return false;
+  var now = new Date(d.spots[d.spot_order[0]].series[hour].slot);
+  var today = now.toISOString().slice(0, 10);
+
+  if (w.type === "road_busy") {
+    var road = Object.keys(d.spots).map(function (k) { return d.spots[k]; })
+      .filter(function (s) { return s.kind === "road"; });
+    return road.some(function (s) {
+      var v = s.series[hour];
+      return v && v.score >= (w.min || 55);
+    });
+  }
+
+  if (w.type === "big_event_today") {
+    return (d.events || []).some(function (e) {
+      return e.start_date <= today && (e.end_date || e.start_date) >= today &&
+             (e.est_attendance || 0) >= (w.min_attendance || 15000);
+    });
+  }
+
+  if (w.type === "after_event") {
+    // 終演の within_hours 時間前から、終演までの間
+    return (d.events || []).some(function (e) {
+      if (!e.end_time || e.start_date > today ||
+          (e.end_date || e.start_date) < today) return false;
+      var end = new Date(today + "T" + e.end_time);
+      var diff = (end - now) / 3600000;
+      return diff > 0 && diff <= (w.within_hours || 2);
+    });
+  }
+
+  if (w.type === "multiday_tomorrow") {
+    var t = new Date(now.getTime() + 86400000).toISOString().slice(0, 10);
+    return (d.events || []).some(function (e) {
+      return e.start_date === t && e.end_date && e.end_date > e.start_date &&
+             (e.est_attendance || 0) >= (w.min_attendance || 10000);
+    });
+  }
+  return false;
+}
+
+function drawOffers(d) {
+  var el = document.getElementById("offers");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!OFFERS || !OFFERS.enabled) return;        // ID 未設定なら何も出さない
+
+  var hit = (OFFERS.offers || []).filter(function (o) {
+    if (!o.enabled || !o.url) return false;
+    // 置き換え忘れのプレースホルダが残っていたら出さない (リンク切れ防止)
+    if (/\{[A-Z_]+\}/.test(o.url)) return false;
+    return offerMatches(o.when, d, hour);
+  }).slice(0, OFFERS.max_shown || 2);
+
+  if (!hit.length) return;
+  el.innerHTML = hit.map(function (o) {
+    return '<div class="offer">' +
+      '<div class="hd"><span class="ad">' + esc(OFFERS.label_ad || "広告") +
+      '</span><b>' + esc(o.title) + '</b></div>' +
+      '<p>' + esc(o.body) + '</p>' +
+      '<a class="cta" href="' + esc(o.url) + '" target="_blank" ' +
+      'rel="noopener sponsored">' + esc(o.cta || "見る") + '</a>' +
+      '<span class="prov">' + esc(o.provider || "") + '</span></div>';
+  }).join("") +
+  '<p class="noev">' + esc(OFFERS.note || "") + '</p>';
+}
+
 /* --- ホーム画面に置けるようにする -------------------------------------
  * Android は「インストールしますか」をブラウザが出してくれるが、
  * iPhone は出してくれない (共有メニューから手で追加するしかない)。
@@ -1196,6 +1293,7 @@ function draw() {
     }).join("");
 
   drawEvents(d, spots);
+  drawOffers(d);
 
   document.getElementById("note").textContent = (designMode() === "flow"
     ? "人がいるのは建物の中と道の上なので、空き地や水面は塗らず、" +

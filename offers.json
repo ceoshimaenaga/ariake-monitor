@@ -1,0 +1,68 @@
+{
+  "_README": [
+    "混雑の状況に合わせて出す案内。アフィリエイトIDを入れると有効になる。",
+    "",
+    "使い方: enabled を true にして、url の {ID} を自分のアフィリエイトIDに",
+    "置き換える。id が空のもの、enabled が false のものは一切表示しない",
+    "(リンク切れを出さないため)。",
+    "",
+    "when で「どういうときに出すか」を決める。種類は4つ:",
+    "  road_busy        : 周辺道路の混雑度が min 以上のとき",
+    "  big_event_today  : その日に min_attendance 人以上のイベントがあるとき",
+    "  after_event      : イベント終演の within_hours 時間前から終演までの間",
+    "  multiday_tomorrow: 翌日から始まる複数日イベントが min_attendance 人以上のとき",
+    "",
+    "同時に出すのは max_shown 件まで。多いと広告だらけになって使われなくなる。",
+    "",
+    "景品表示法のステルスマーケティング規制 (2023年10月施行) により、",
+    "広告であることを明示する必要がある。label_ad の文言は消さないこと。"
+  ],
+
+  "enabled": false,
+  "max_shown": 2,
+  "label_ad": "広告",
+  "note": "混雑状況に合わせて表示しています。リンク先は外部サイトです。",
+
+  "offers": [
+    {
+      "id": "akippa",
+      "enabled": false,
+      "title": "周辺の駐車場を予約する",
+      "body": "この時間は周辺道路が混みます。予約しておくと、満車を探して回らずに済みます。",
+      "cta": "空きを見る",
+      "url": "https://ck.jp.ap.valuecommerce.com/servlet/referral?sid={SID}&pid={PID}&vc_url=https%3A%2F%2Fwww.akippa.com%2F",
+      "provider": "akippa（バリューコマース）",
+      "when": { "type": "road_busy", "min": 55 }
+    },
+    {
+      "id": "akippa_event",
+      "enabled": false,
+      "title": "車で行くなら駐車場の予約を",
+      "body": "大きなイベントがある日です。周辺の駐車場は昼前に埋まることがあります。",
+      "cta": "空きを見る",
+      "url": "https://ck.jp.ap.valuecommerce.com/servlet/referral?sid={SID}&pid={PID}&vc_url=https%3A%2F%2Fwww.akippa.com%2F",
+      "provider": "akippa（バリューコマース）",
+      "when": { "type": "big_event_today", "min_attendance": 15000 }
+    },
+    {
+      "id": "restaurant",
+      "enabled": false,
+      "title": "終演後の食事は先に押さえる",
+      "body": "まもなく終演です。この後1〜2時間は周辺の飲食店が混み合います。",
+      "cta": "空席を探す",
+      "url": "https://px.a8.net/svt/ejp?a8mat={A8MAT}",
+      "provider": "一休.comレストラン（A8.net）",
+      "when": { "type": "after_event", "within_hours": 2 }
+    },
+    {
+      "id": "hotel",
+      "enabled": false,
+      "title": "前泊という手もあります",
+      "body": "明日から複数日の大型イベントです。朝の電車は初日がいちばん混みます。",
+      "cta": "周辺の宿を見る",
+      "url": "https://hb.afl.rakuten.co.jp/hgc/{RAKUTEN_ID}/?pc=https%3A%2F%2Ftravel.rakuten.co.jp%2F",
+      "provider": "楽天トラベル（もしもアフィリエイト）",
+      "when": { "type": "multiday_tomorrow", "min_attendance": 10000 }
+    }
+  ]
+}
