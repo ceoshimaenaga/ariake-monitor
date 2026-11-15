@@ -1,0 +1,61 @@
+name: probe
+
+# 施設の公式ページを実際に取得して中身を見る。
+# このセッションのネットワークからは届かないサイトがあるため、調査はここで行う。
+# 「イベントが0件になった」「所在地を確かめたい」ときに手で走らせる。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "調べる URL"
+        type: string
+        required: true
+      mode:
+        description: "dump = 日付を含むHTMLブロック / grep = 下の語を含む行"
+        type: choice
+        options: [dump, grep]
+        default: dump
+      pattern:
+        description: "grep のときに探す語 (| 区切り)"
+        type: string
+        default: "住所|所在地|江東区|有明"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Probe
+        env:
+          URL: ${{ inputs.url }}
+          MODE: ${{ inputs.mode }}
+          PATTERN: ${{ inputs.pattern }}
+        run: |
+          if [ "$MODE" = "grep" ]; then
+            python - <<'PY'
+          import os, re, sys
+          sys.path.insert(0, ".")
+          from ariake.util import fetch
+          html = fetch(os.environ["URL"]).text
+          text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S)
+          text = re.sub(r"<[^>]+>", "\n", text)
+          pat = re.compile(os.environ["PATTERN"])
+          seen = set()
+          for line in (l.strip() for l in text.splitlines()):
+              if line and pat.search(line) and line not in seen:
+                  seen.add(line)
+                  print(line[:200], flush=True)
+          print(f"--- 該当 {len(seen)} 行", flush=True)
+          PY
+          else
+            python ariake/probe.py --dump "$URL"
+          fi
