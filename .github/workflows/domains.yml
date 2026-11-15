@@ -38,4 +38,6 @@ jobs:
               *)   s="判定できず HTTP${code}" ;;
             esac
             printf '%-26s %s\n' "$d" "$s"
+            # rdap.org は立て続けに訊くと 429 を返す。1件ごとに間を置く
+            sleep 7
           done
