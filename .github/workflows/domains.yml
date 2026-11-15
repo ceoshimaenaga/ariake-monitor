@@ -26,18 +26,36 @@ jobs:
         env:
           NAMES: ${{ inputs.names }}
         run: |
+          sudo apt-get -qq update >/dev/null 2>&1 || true
+          sudo apt-get -qq install -y whois >/dev/null 2>&1 || true
+
           echo "$NAMES" | tr ',' '\n' | sed 's/[[:space:]]//g' | grep . | while read -r d; do
-            # rdap.org が各レジストリの窓口へ振り分けてくれる
-            code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 \
-                   "https://rdap.org/domain/${d}" || echo 000)
-            case "$code" in
-              404) s="空き" ;;
-              200) s="登録済み" ;;
-              429) s="問い合わせ過多 (時間をおく)" ;;
-              000) s="届かない" ;;
-              *)   s="判定できず HTTP${code}" ;;
+            case "$d" in
+              *.jp)
+                # .jp は rdap.org に窓口がなく、登録済みでも 404 を返す。
+                # (google.jp が「空き」と出て気づいた) JPRS に直接訊く。
+                out=$(whois -h whois.jprs.jp "$d" 2>/dev/null)
+                if echo "$out" | grep -qi "No match"; then s="空き"
+                elif echo "$out" | grep -qi "\[Registrant\]\|\[登録者名\]\|\[Domain Name\]"; then s="登録済み"
+                else s="判定できず"
+                fi
+                ;;
+              *)
+                # rdap.org が各レジストリの窓口へ振り分けてくれる。
+                # ccTLD は窓口が無いことがあるので、確実に登録済みの名前を
+                # 混ぜて対照を取ること。
+                code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 \
+                       "https://rdap.org/domain/${d}" || echo 000)
+                case "$code" in
+                  404) s="空き" ;;
+                  200) s="登録済み" ;;
+                  429) s="問い合わせ過多 (時間をおく)" ;;
+                  000) s="届かない" ;;
+                  *)   s="判定できず HTTP${code}" ;;
+                esac
+                ;;
             esac
             printf '%-26s %s\n' "$d" "$s"
-            # rdap.org は立て続けに訊くと 429 を返す。1件ごとに間を置く
+            # 立て続けに訊くと弾かれる。1件ごとに間を置く
             sleep 7
           done
