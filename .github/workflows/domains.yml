@@ -1,0 +1,41 @@
+name: domains
+
+# ドメインの空きを調べる。
+# このプロジェクトのコンテナからは RDAP にも DNS にも届かないため、
+# 問い合わせはここ (GitHub の走行環境) から行う。
+#
+# 結果は目安。登録の可否は最終的に登録業者の画面が決める。
+# とくに .jp は予約語や地域型の規則があり、空きと出ても取れないことがある。
+
+on:
+  workflow_dispatch:
+    inputs:
+      names:
+        description: "調べるドメイン (カンマ区切り)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check
+        env:
+          NAMES: ${{ inputs.names }}
+        run: |
+          echo "$NAMES" | tr ',' '\n' | sed 's/[[:space:]]//g' | grep . | while read -r d; do
+            # rdap.org が各レジストリの窓口へ振り分けてくれる
+            code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 \
+                   "https://rdap.org/domain/${d}" || echo 000)
+            case "$code" in
+              404) s="空き" ;;
+              200) s="登録済み" ;;
+              429) s="問い合わせ過多 (時間をおく)" ;;
+              000) s="届かない" ;;
+              *)   s="判定できず HTTP${code}" ;;
+            esac
+            printf '%-26s %s\n' "$d" "$s"
+          done
