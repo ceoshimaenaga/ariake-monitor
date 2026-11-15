@@ -127,6 +127,21 @@
     margin-top:12px; align-items:center; }
   .legend b { width:12px; height:12px; border-radius:3px; display:inline-block;
     margin-right:5px; vertical-align:-2px; }
+  /* これからの予定。会場ごとにまとめる */
+  .venue { border-top:1px solid var(--line); padding:12px 0 4px; }
+  .venue > h3 { font-size:13px; margin:0 0 8px; display:flex; gap:8px;
+    align-items:baseline; flex-wrap:wrap; }
+  .venue .cnt { color:var(--muted); font-size:11px; font-weight:400; }
+  .ev { display:flex; gap:12px; padding:5px 0; font-size:13px;
+    align-items:baseline; flex-wrap:wrap; }
+  .ev .when { color:var(--sec); font-variant-numeric:tabular-nums;
+    white-space:nowrap; min-width:112px; }
+  .ev .ttl { flex:1; min-width:180px; }
+  .ev .ttl a { color:inherit; }
+  .ev .att { color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums;
+    white-space:nowrap; }
+  .ev.soon .when { color:var(--accent); font-weight:700; }
+  .noev { color:var(--muted); font-size:12px; padding:10px 0; }
   h2 { font-size:12px; letter-spacing:.1em; color:var(--muted); margin:30px 0 10px;
     text-transform:uppercase; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -160,6 +175,8 @@
   <p class="note" id="note"></p>
   <h2 id="rankttl">この時間の混雑順</h2>
   <table id="rank"></table>
+  <h2 id="evttl">これからの予定</h2>
+  <div id="events"></div>
   <footer id="foot"></footer>
 </div>
 <script src="../ariake-common.js"></script><script src="../ariake-settings.js"></script>
@@ -648,6 +665,73 @@ function drawScale(ctx, W, H, box) {
   ctx.restore();
 }
 
+/* これからの予定を会場ごとに出す。
+ * 地図は「何時にどこが混むか」しか言わないので、その理由になっている
+ * イベントそのものを読めるようにする。表示は地図と同じ絞り込みに従う
+ * (非表示にした場所や「固定したものだけ」の設定を尊重する)。 */
+function drawEvents(d, spots) {
+  var shown = {};
+  spots.forEach(function (s) { shown[s.id] = true; });
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+
+  var list = (d.events || []).filter(function (e) {
+    if (!shown[e.venue]) return false;
+    var end = new Date((e.end_date || e.start_date) + "T23:59");
+    return end >= today;
+  }).sort(function (a, b) {
+    return (a.start_date + (a.start_time || "")).localeCompare(
+           b.start_date + (b.start_time || ""));
+  });
+
+  var el = document.getElementById("events");
+  document.getElementById("evttl").textContent =
+    "これからの予定" + (list.length ? "（" + list.length + "件）" : "");
+  if (!list.length) {
+    el.innerHTML = '<p class="noev">表示中の場所に、これからの予定は見つかっていません。' +
+      '各施設の公式サイトから取れたぶんだけを出しています。</p>';
+    return;
+  }
+
+  // 会場ごとにまとめる。順番は最初の予定が早い会場から。
+  var byVenue = {}, order = [];
+  list.forEach(function (e) {
+    if (!byVenue[e.venue]) { byVenue[e.venue] = []; order.push(e.venue); }
+    byVenue[e.venue].push(e);
+  });
+
+  el.innerHTML = order.map(function (v) {
+    var evs = byVenue[v];
+    return '<div class="venue"><h3>' + esc(evs[0].venue_name) +
+      '<span class="cnt">' + evs.length + '件</span></h3>' +
+      evs.map(function (e) { return evRow(e, today); }).join("") + '</div>';
+  }).join("");
+}
+
+function evRow(e, today) {
+  var start = new Date(e.start_date + "T00:00");
+  var days = Math.round((start - today) / 86400000);
+  var when = A.md(e.start_date) + "(" + A.dow(e.start_date) + ")";
+  if (e.end_date && e.end_date !== e.start_date) when += "〜" + A.md(e.end_date);
+  else if (e.start_time) when += " " + e.start_time;
+  // 3日以内は地図のスライダーで追える範囲なので目立たせる
+  var soon = days <= 3;
+  var att = e.est_attendance
+    ? '<span class="att" title="' + esc(e.scale_label || "") + '">' +
+      "約" + Math.round(e.est_attendance / 1000) + "千人</span>" : "";
+  var title = esc(e.title);
+  if (e.url) title = '<a href="' + esc(e.url) + '" target="_blank" rel="noopener">' +
+    title + "</a>";
+  return '<div class="ev' + (soon ? " soon" : "") + '">' +
+    '<span class="when">' + when + (days === 0 ? " 今日" : "") + "</span>" +
+    '<span class="ttl">' + title + "</span>" + att + "</div>";
+}
+
+function esc(t) {
+  return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
 function niceStep(span) {
   var raw = span / 4;
   var pow = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -962,6 +1046,8 @@ function draw() {
         '</td><td style="color:var(--muted)">' + (A.mainCause(r.v.factors) || "平常の人出") +
         '</td></tr>';
     }).join("");
+
+  drawEvents(d, spots);
 
   document.getElementById("note").textContent = (designMode() === "flow"
     ? "人がいるのは建物の中と道の上なので、空き地や水面は塗らず、" +
