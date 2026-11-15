@@ -2,6 +2,13 @@
 <html lang="ja"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>有明 混雑モニター — 案5 ATLAS</title>
+<!-- ホーム画面に置けるようにする (PWA)。build_site.py が配信時に有効化する。 -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d0d0d">
+<link rel="apple-touch-icon" href="app/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="有明混雑">
 <style>
   /* デザインは3種類。どれも「色」だけの違いで、出しているデータは同じ。
    * 地図の下地の色も CSS 変数で持たせ、canvas 側はそれを読んで描く。
@@ -88,6 +95,20 @@
   .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     justify-content:space-between; margin:14px 0 0; }
   .skins { display:flex; gap:4px; align-items:center; }
+  /* スマホではデザイン選択が1行に収まらない。折り返すと縦に伸びるので、
+   * 横スクロールにして高さを保つ。 */
+  @media (max-width: 760px) {
+    .bar { flex-direction:column; align-items:stretch; gap:10px; }
+    .skins { overflow-x:auto; -webkit-overflow-scrolling:touch;
+      scrollbar-width:none; padding-bottom:2px; }
+    .skins::-webkit-scrollbar { display:none; }
+    .skins > * { flex:none; }
+    .skins button { white-space:nowrap; }
+    .areas { overflow-x:auto; scrollbar-width:none; }
+    .areas::-webkit-scrollbar { display:none; }
+    .areas button { flex:none; white-space:nowrap; }
+    .wrap { padding:18px 14px 90px; }
+  }
   .skins span { color:var(--muted); font-size:11px; margin-right:4px; }
   .skins button { border:1px solid var(--line); background:var(--panel);
     color:var(--muted); border-radius:8px; padding:5px 10px; font-size:11px;
@@ -142,6 +163,30 @@
     white-space:nowrap; }
   .ev.soon .when { color:var(--accent); font-weight:700; }
   .noev { color:var(--muted); font-size:12px; padding:10px 0; }
+  /* 通信できていないときの帯。古いデータを黙って新しいふりで見せない */
+  .stale { display:none; background:color-mix(in srgb, var(--warning) 18%, var(--panel));
+    border:1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
+    color:var(--text); border-radius:10px; padding:9px 13px; font-size:12px;
+    margin:0 0 12px; line-height:1.6; }
+  .stale.on { display:block; }
+  /* ホーム画面への追加案内。iPhone は自動で出ないので自前で出す */
+  .a2hs { position:fixed; left:12px; right:12px; bottom:12px; z-index:40;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:14px 16px; box-shadow:0 10px 30px rgba(0,0,0,.45);
+    display:none; gap:12px; align-items:flex-start;
+    max-width:520px; margin:0 auto; font-size:13px; line-height:1.7; }
+  .a2hs.on { display:flex; }
+  .a2hs .ic { width:38px; height:38px; border-radius:9px; flex:none; }
+  .a2hs .bd { flex:1; }
+  .a2hs b { display:block; margin-bottom:2px; }
+  .a2hs .sub { color:var(--sec); }
+  .a2hs .row { display:flex; gap:8px; margin-top:10px; }
+  .a2hs button { border:1px solid var(--line); background:transparent; color:var(--text);
+    border-radius:8px; padding:6px 13px; font-size:12px; cursor:pointer; }
+  .a2hs button.go { border-color:var(--accent); background:var(--accent); color:#fff;
+    font-weight:700; }
+  .a2hs .close { position:absolute; top:6px; right:10px; border:0; background:none;
+    color:var(--muted); font-size:18px; padding:4px 6px; }
   h2 { font-size:12px; letter-spacing:.1em; color:var(--muted); margin:30px 0 10px;
     text-transform:uppercase; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -154,6 +199,7 @@
 </style></head><body>
 <div class="wrap">
   <h1>有明 混雑マップ</h1><div class="sub" id="sub"></div>
+  <div class="stale" id="stale"></div>
   <div class="scrub">
     <button class="play" id="play" aria-pressed="false">▶ 再生</button>
     <span class="lbl" id="lbl"></span>
@@ -178,6 +224,18 @@
   <h2 id="evttl">これからの予定</h2>
   <div id="events"></div>
   <footer id="foot"></footer>
+</div>
+<div class="a2hs" id="a2hs">
+  <img class="ic" id="a2hsic" alt="" src="app/icon-192.png">
+  <div class="bd">
+    <b>ホーム画面に置けます</b>
+    <span class="sub" id="a2hstxt"></span>
+    <div class="row">
+      <button class="go" id="a2hsgo">追加する</button>
+      <button id="a2hsno">あとで</button>
+    </div>
+  </div>
+  <button class="close" id="a2hsx" aria-label="閉じる">×</button>
 </div>
 <script src="../ariake-common.js"></script><script src="../ariake-settings.js"></script>
 <script>
@@ -732,6 +790,85 @@ function esc(t) {
   });
 }
 
+/* --- ホーム画面に置けるようにする -------------------------------------
+ * Android は「インストールしますか」をブラウザが出してくれるが、
+ * iPhone は出してくれない (共有メニューから手で追加するしかない)。
+ * 日本は iPhone が多いので、iPhone 向けの案内は自前で出す。 */
+var deferredPrompt = null;
+
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches ||
+         window.navigator.standalone === true;
+}
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+         // iPad は iOS 13 以降 Mac を名乗るので、触れるかどうかで見分ける
+         (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function setupInstall() {
+  var box = document.getElementById("a2hs");
+  var SEEN = "ariake.a2hs.v1";
+  function hide(remember) {
+    box.classList.remove("on");
+    if (remember) { try { localStorage.setItem(SEEN, String(Date.now())); } catch (e) {} }
+  }
+  document.getElementById("a2hsno").onclick = function () { hide(true); };
+  document.getElementById("a2hsx").onclick = function () { hide(true); };
+
+  // すでに置いてある / 一度断られた、なら出さない
+  if (isStandalone()) return;
+  var seen = null;
+  try { seen = localStorage.getItem(SEEN); } catch (e) {}
+  // 断られてから30日は出さない
+  if (seen && Date.now() - (+seen) < 30 * 86400000) return;
+
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    document.getElementById("a2hstxt").textContent =
+      "アプリのように全画面で開けて、電波が弱くても直前の予測が見られます。";
+    document.getElementById("a2hsgo").textContent = "追加する";
+    document.getElementById("a2hsgo").onclick = function () {
+      hide(true);
+      deferredPrompt.prompt();
+      deferredPrompt = null;
+    };
+    box.classList.add("on");
+  });
+
+  if (isIOS()) {
+    // iPhone は自動の案内が無いので、手順を文字で出す
+    document.getElementById("a2hstxt").innerHTML =
+      "下の <b style=\"display:inline\">共有ボタン</b> を押して、" +
+      "「ホーム画面に追加」を選んでください。" +
+      "全画面で開けて、電波が弱くても直前の予測が見られます。";
+    document.getElementById("a2hsgo").textContent = "わかった";
+    document.getElementById("a2hsgo").onclick = function () { hide(true); };
+    // 開いてすぐ出すと鬱陶しいので、少し使ってから
+    setTimeout(function () { if (!isStandalone()) box.classList.add("on"); }, 12000);
+  }
+}
+
+/* データがいつ時点のものかを必ず出す。電波が無いときは手元の古いものを
+ * 見せるが、古いことを黙っているのが一番まずいので、帯で知らせる。 */
+function showStale(d) {
+  var el = document.getElementById("stale");
+  var age = (Date.now() - new Date(d.generated_at)) / 3600000;
+  if (navigator.onLine && age < 3) { el.classList.remove("on"); return; }
+  var h = Math.floor(age), txt;
+  if (!navigator.onLine) {
+    txt = "通信できていないため、手元に残っている" +
+          (h < 1 ? "さきほど" : "約" + h + "時間前") + "のデータを表示しています。";
+  } else {
+    txt = "データが" + (h < 24 ? "約" + h + "時間" :
+          "約" + Math.floor(h / 24) + "日") + "前のまま更新されていません。" +
+          "収集が止まっている可能性があります。";
+  }
+  el.textContent = txt;
+  el.classList.add("on");
+}
+
 function niceStep(span) {
   var raw = span / 4;
   var pow = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -862,7 +999,14 @@ function play() {
     setHour(hour >= max ? 0 : hour + 1);
   }, 160);
 }
-A.load("../ariake.json").then(function (d) {
+A.load("../ariake.json").catch(function () {
+  // 電波が無く、手元にも何も残っていないとき。真っ白にはしない。
+  var el = document.getElementById("stale");
+  el.textContent = "データを読み込めませんでした。通信できる場所で一度開くと、" +
+    "次からは電波が無くても直前の予測を見られるようになります。";
+  el.classList.add("on");
+  throw new Error("no data");
+}).then(function (d) {
   window.DATA = d; AriakeSettings.mount(d);
   var sl = document.getElementById("slider");
   sl.max = Math.min(71, d.spots[d.spot_order[0]].series.length - 1);
@@ -870,6 +1014,10 @@ A.load("../ariake.json").then(function (d) {
   document.getElementById("nowbtn").onclick = function () { stop(); setHour(0); };
   document.getElementById("play").onclick = function () { playing ? stop() : play(); };
   bindMap();
+  setupInstall();
+  showStale(d);
+  addEventListener("online", function () { showStale(window.DATA); });
+  addEventListener("offline", function () { showStale(window.DATA); });
   var mid = function () { var m = document.getElementById("map");
     return [m.clientWidth / 2, m.clientHeight / 2]; };
   document.getElementById("zin").onclick = function () { var c = mid(); zoomAt(c[0], c[1], 1.6); };

@@ -28,7 +28,30 @@ ASSETS = [
 # 配信しないもの。named は座標合わせ (locate.py) にしか使わないのに
 # 146KB あり、地図ページは読んでいない。全訪問者に配る理由がない。
 BASEMAP_DROP = ("named",)
-ASSET_DIRS = [("designs/icons/png", "icons/png")]
+ASSET_DIRS = [("designs/icons/png", "icons/png"), ("designs/app", "app")]
+
+
+# 配信版にだけ入れる Service Worker の登録。
+# updatefound で新しい版が入ったら、次に開いたときに確実に切り替わるよう
+# ページを読み直す (ホーム画面に置くと、古い版が居座りやすいため)。
+SW_SNIPPET = """<script>
+if ("serviceWorker" in navigator) {
+  addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").then(function (reg) {
+      reg.addEventListener("updatefound", function () {
+        var w = reg.installing;
+        if (!w) return;
+        w.addEventListener("statechange", function () {
+          if (w.state === "installed" && navigator.serviceWorker.controller) {
+            location.reload();
+          }
+        });
+      });
+    }).catch(function () { /* 登録できなくても、ただのサイトとして動く */ });
+  });
+}
+</script>
+"""
 
 
 def build_page() -> str:
@@ -39,6 +62,11 @@ def build_page() -> str:
     html = html.replace('A.load("../ariake.json")', 'A.load("ariake.json")')
     # 公開ページなので検索避けは外す
     html = re.sub(r'\s*<meta name="robots"[^>]*>', "", html)
+    # manifest は配信時に app/ の下に置く
+    html = html.replace('href="manifest.webmanifest"', 'href="app/manifest.webmanifest"')
+    # Service Worker は配信するときだけ入れる。手元の開発用サーバーで
+    # 登録してしまうと、直したはずのものが古いまま出て混乱するため。
+    html = html.replace("</body>", SW_SNIPPET + "</body>")
     # タブに出る名前は案の番号ではなくサービス名にする
     html = html.replace(
         "<title>有明 混雑モニター — 案5 ATLAS</title>",
@@ -56,6 +84,11 @@ def main() -> None:
 
     with open(os.path.join(OUT, "index.html"), "w", encoding="utf-8") as f:
         f.write(build_page())
+
+    # Service Worker はサイト全体を見る必要があるので、ルートに置く
+    # (app/ の下に置くと app/ 以下しか面倒を見られない)
+    shutil.copy2(os.path.join(ROOT, "designs/app/sw.js"),
+                 os.path.join(OUT, "sw.js"))
 
     for src, dst in ASSETS:
         shutil.copy2(os.path.join(ROOT, src), os.path.join(OUT, dst))

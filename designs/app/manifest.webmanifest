@@ -1,0 +1,20 @@
+{
+  "name": "有明 混雑マップ",
+  "short_name": "有明混雑",
+  "description": "有明・豊洲・お台場の混雑といまから3日先の予測を、実際の地形の地図の上に表示します。",
+  "lang": "ja",
+  "dir": "ltr",
+  "start_url": "../",
+  "scope": "../",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "categories": ["travel", "navigation", "utilities"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
