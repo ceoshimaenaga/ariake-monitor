@@ -109,6 +109,17 @@ def main() -> None:
     # Jekyll に触らせない (_ で始まる名前などを消されないように)
     open(os.path.join(OUT, ".nojekyll"), "w").close()
 
+    # 独自ドメイン。リポジトリ直下に CNAME を置いた時だけ配る。
+    #
+    # 置いた瞬間から GitHub Pages はそのドメインを待ち受け、既定の
+    # xxx.github.io では開けなくなる。だから DNS を向けた後に置くこと。
+    # (ファイルの有無で切り替わるので、外せば元に戻る)
+    cname = os.path.join(ROOT, "CNAME")
+    if os.path.exists(cname):
+        shutil.copy2(cname, os.path.join(OUT, "CNAME"))
+        with open(cname, encoding="utf-8") as f:
+            print(f"独自ドメイン: {f.read().strip()}", flush=True)
+
     total = sum(
         os.path.getsize(os.path.join(dp, n))
         for dp, _, ns in os.walk(OUT) for n in ns
