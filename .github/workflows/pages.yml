@@ -15,17 +15,16 @@ permissions:
 
 concurrency:
   group: pages
-  # 立て続けに push すると、走っている最中のビルドが止められ、
-  # 成果物が無いまま deploy 段だけが動いて失敗する (エラーメールが連続する)。
-  # Pages は中断せず順に出すのが正しい。
+  # Pages は中断せず順に出す。中断すると配信済みの版が巻き戻りうる。
   cancel-in-progress: false
 
+# 組み立てと配信を分ける。
+# 同じジョブに入れると、アップロード直後の成果物を配信段が見つけられず
+# 「No artifacts named github-pages」で落ちることがある。
+# (実際に2回落ちた。GitHub 公式のテンプレートも2ジョブに分けている)
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,13 +35,18 @@ jobs:
       - name: Build _site
         run: python ariake/build_site.py
 
-      # enablement: true は権限不足で落ちることがあり、Pages は既に
-      # 設定画面で有効にしてあるので指定しない
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4
