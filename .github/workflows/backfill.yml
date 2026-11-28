@@ -1,0 +1,70 @@
+name: backfill
+
+# 過去のイベントを遡って events_history.json に貯める。
+# このプロジェクトのコンテナからは各会場のサイトに出られないため、ここで走らせる。
+# 手で走らせる想定 (毎時の収集とは別物で、急ぐ必要がない)。
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "開始月 YYYY-MM"
+        type: string
+        default: "2026-01"
+      to:
+        description: "終了月 YYYY-MM (空なら今月)"
+        type: string
+        default: ""
+      venue:
+        description: "この会場だけ (空なら全部)"
+        type: string
+        default: ""
+      dry_run:
+        description: "書き出さず件数だけ見る"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Backfill
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          VENUE: ${{ inputs.venue }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          args="--from $FROM"
+          [ -n "$TO" ] && args="$args --to $TO"
+          [ -n "$VENUE" ] && args="$args --venue $VENUE"
+          [ "$DRY" = "true" ] && args="$args --dry-run"
+          echo "引数: $args"
+          python ariake/backfill.py $args
+
+      - name: Commit events_history.json
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          git config user.name "ariake-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add events_history.json
+          if git diff --staged --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: 過去イベントの記録を更新"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi
