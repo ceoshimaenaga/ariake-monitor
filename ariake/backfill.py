@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import date
 from urllib.parse import quote
 
@@ -88,41 +89,81 @@ def save_history(path: str, items: dict[tuple, dict], span: str) -> None:
 
 # インターネットアーカイブ。保存済みページの一覧と、その中身。
 # id_ を付けると、アーカイブ側の枠組み (ツールバー等) が混ざらない生のHTMLが返る。
+#
+# 立て続けに投げると接続を拒否される (Connection refused)。
+# 相手の持ち物を読ませてもらっている以上、間を空けるのが筋でもある。
+# 「拒否された」と「保存版が無い」は意味が違うので、必ず区別する。
+# 混同すると「無い」と誤って判断し、取れるはずのものを諦めることになる。
 CDX = ("https://web.archive.org/cdx/search/cdx?url={url}"
        "&from={ym}01&to={ym}31&output=json&limit={limit}"
        "&filter=statuscode:200&collapse=timestamp:6")
 WB = "https://web.archive.org/web/{ts}id_/{url}"
 
 
-def snapshots(url: str, ym: str, limit: int = 2) -> list[str]:
-    """その月に保存された版の日時を、古い順に返す。無ければ空。"""
-    r = fetch(CDX.format(url=quote(url, safe=""), ym=ym, limit=limit))
+PAUSE = 3.0        # 1回ごとに空ける秒数
+TRIES = 3          # 拒否されたときに試す回数
+BACKOFF = 8.0      # 拒否されたあと待つ秒数 (回を追うごとに倍)
+
+
+def wayback(url: str):
+    """アーカイブに1回問い合わせる。間を空け、拒否されたら少し待って試す。
+
+    返り値は応答か None。None は「拒否された/届かなかった」であって、
+    「保存版が無い」ではない。
+    """
+    wait = BACKOFF
+    for i in range(TRIES):
+        time.sleep(PAUSE)
+        r = fetch(url)
+        if r is not None:
+            return r
+        if i < TRIES - 1:
+            time.sleep(wait)
+            wait *= 2
+    return None
+
+
+def snapshots(url: str, ym: str, limit: int = 2):
+    """その月に保存された版の日時を古い順に返す。
+
+    返り値は (日時の並び, 届いたか)。届かなかったときは ([], False) で、
+    これは「保存版が無い」 ([], True) とは区別する。
+    """
+    r = wayback(CDX.format(url=quote(url, safe=""), ym=ym, limit=limit))
     if r is None:
-        return []
+        return [], False
     try:
         rows = json.loads(r.text or "[]")
     except json.JSONDecodeError:
-        return []
+        return [], True
     if len(rows) < 2:          # 1行目は見出し
-        return []
+        return [], True
     head = rows[0]
     i = head.index("timestamp") if "timestamp" in head else 1
-    return [row[i] for row in rows[1:] if len(row) > i]
+    return [row[i] for row in rows[1:] if len(row) > i], True
 
 
-def archived_pages(src: dict, first: date) -> list[tuple[str, str]]:
-    """その月に保存されていたページを (説明, HTML) で返す。"""
-    out = []
+def archived_pages(src: dict, first: date):
+    """その月に保存されていたページを返す。
+
+    返り値は (ページの並び, 届いたか)。届かなかったときと、
+    保存版が無かったときを呼び出し側で言い分けられるようにする。
+    """
+    out, reached = [], True
     ym = f"{first:%Y%m}"
     for url in src.get("urls", []):
-        for ts in snapshots(url, ym):
-            r = fetch(WB.format(ts=ts, url=url))
+        ts_list, ok = snapshots(url, ym)
+        if not ok:
+            reached = False
+            continue
+        for ts in ts_list:
+            r = wayback(WB.format(ts=ts, url=url))
             if r is None or not r.text:
                 continue
             out.append((f"保存版 {ts[:8]}", r.text))
             # 同じ月に何版もある場合、最初に中身が取れた版で足りる
             break
-    return out
+    return out, reached
 
 
 def check_archive() -> None:
@@ -147,7 +188,7 @@ def check_archive() -> None:
                 q = ("https://web.archive.org/cdx/search/cdx?url={u}"
                      "&output=json&limit=4&filter=statuscode:200"
                      "&collapse=timestamp:4").format(u=quote(v, safe=""))
-                r = fetch(q)
+                r = wayback(q)
                 rows = []
                 if r is not None:
                     try:
@@ -211,9 +252,9 @@ def run(d_from: date, d_to: date, dry: bool, only: str | None,
         per_month, got_total = [], 0
         for first in months_between(d_from, d_to):
             ym = f"{first:%Y-%m}"
-            pages = archived_pages(src, first)
+            pages, reached = archived_pages(src, first)
             if not pages:
-                per_month.append(f"{ym}:保存版なし")
+                per_month.append(f"{ym}:" + ("保存版なし" if reached else "届かず"))
                 continue
 
             found = []
