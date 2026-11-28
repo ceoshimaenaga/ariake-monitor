@@ -1,0 +1,35 @@
+name: httpcheck
+
+# 公開URLが実際に開けるかを、外から確かめる。
+# このプロジェクトのコンテナは外部サイトに出られないため、確認はここで行う。
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "確かめる URL (カンマ区切り)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check
+        env:
+          URLS: ${{ inputs.urls }}
+        run: |
+          echo "$URLS" | tr ',' '\n' | sed 's/[[:space:]]//g' | grep . | while read -r u; do
+            echo "=============================="
+            echo "URL: $u"
+            # 証明書の検証込みで、リダイレクトを追って最終状態を見る
+            curl -sS -o /tmp/body.html -w \
+              'HTTP      %{http_code}\n最終URL   %{url_effective}\n証明書    %{ssl_verify_result} (0 なら正常)\n所要      %{time_total}s\n大きさ    %{size_download} bytes\n' \
+              -L --max-time 30 "$u" || echo "取得できず"
+            echo "--- タイトルと冒頭 ---"
+            grep -oiE '<title>[^<]*</title>' /tmp/body.html | head -1 || true
+            grep -oiE 'ariake|混雑|konzatsu' /tmp/body.html | sort | uniq -c | head -5 || true
+          done
