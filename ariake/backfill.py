@@ -35,6 +35,7 @@ import json
 import os
 import sys
 from datetime import date
+from urllib.parse import quote
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
@@ -85,6 +86,45 @@ def save_history(path: str, items: dict[tuple, dict], span: str) -> None:
         json.dump(doc, f, ensure_ascii=False, indent=1)
 
 
+# インターネットアーカイブ。保存済みページの一覧と、その中身。
+# id_ を付けると、アーカイブ側の枠組み (ツールバー等) が混ざらない生のHTMLが返る。
+CDX = ("https://web.archive.org/cdx/search/cdx?url={url}"
+       "&from={ym}01&to={ym}31&output=json&limit={limit}"
+       "&filter=statuscode:200&collapse=timestamp:6")
+WB = "https://web.archive.org/web/{ts}id_/{url}"
+
+
+def snapshots(url: str, ym: str, limit: int = 2) -> list[str]:
+    """その月に保存された版の日時を、古い順に返す。無ければ空。"""
+    r = fetch(CDX.format(url=quote(url, safe=""), ym=ym, limit=limit))
+    if r is None:
+        return []
+    try:
+        rows = json.loads(r.text or "[]")
+    except json.JSONDecodeError:
+        return []
+    if len(rows) < 2:          # 1行目は見出し
+        return []
+    head = rows[0]
+    i = head.index("timestamp") if "timestamp" in head else 1
+    return [row[i] for row in rows[1:] if len(row) > i]
+
+
+def archived_pages(src: dict, first: date) -> list[tuple[str, str]]:
+    """その月に保存されていたページを (説明, HTML) で返す。"""
+    out = []
+    ym = f"{first:%Y%m}"
+    for url in src.get("urls", []):
+        for ts in snapshots(url, ym):
+            r = fetch(WB.format(ts=ts, url=url))
+            if r is None or not r.text:
+                continue
+            out.append((f"保存版 {ts[:8]}", r.text))
+            # 同じ月に何版もある場合、最初に中身が取れた版で足りる
+            break
+    return out
+
+
 def months_between(a: date, b: date):
     """a の月から b の月まで、各月の1日を順に返す。"""
     y, m = a.year, a.month
@@ -128,25 +168,20 @@ def run(d_from: date, d_to: date, dry: bool, only: str | None,
         venue = src["venue"]
         if only and venue != only:
             continue
-        if src.get("render"):
-            rows.append((venue, "—", "実ブラウザでの描画が必要 (render.py の担当)"))
-            continue
-        if not src.get("month_param"):
-            rows.append((venue, "—", "月送りのクエリが未判明。調査が要る"))
-            continue
 
         per_month, got_total = [], 0
         for first in months_between(d_from, d_to):
-            url = src["month_param"].format(ym=first.strftime("%Y%m"))
-            r = fetch(url)
-            if r is None:
-                per_month.append(f"{first:%Y-%m}:取得失敗")
-                continue
-            found = [e for e in extract(r.text, venue, src, first) if keep(e)]
-
-            # その月のページに載っていた、別の月のイベントは数えない。
-            # (前後の月へのリンクを拾ってしまうことがあるため)
             ym = f"{first:%Y-%m}"
+            pages = archived_pages(src, first)
+            if not pages:
+                per_month.append(f"{ym}:保存版なし")
+                continue
+
+            found = []
+            for _label, body in pages:
+                found += [e for e in extract(body, venue, src, first) if keep(e)]
+
+            # 保存版には前後の月の予定も載っている。依頼した月の分だけ数える。
             found = [e for e in found
                      if e["start_date"][:7] == ym or e["end_date"][:7] == ym]
 
