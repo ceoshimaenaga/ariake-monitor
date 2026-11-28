@@ -125,6 +125,45 @@ def archived_pages(src: dict, first: date) -> list[tuple[str, str]]:
     return out
 
 
+def check_archive() -> None:
+    """各取得先が、そもそもどれだけ保存されているかを調べる。
+
+    「保存版なし」が続くとき、本当に無いのか、問い合わせ方が
+    悪いだけなのかを切り分けるために使う。
+    URL の書き方 (http/https、末尾のスラッシュ) で当たりが変わるので、
+    いくつか試して、当たった形を出す。
+    """
+    print("=== 保存状況の調査 ===", flush=True)
+    for src in config.EVENT_SOURCES:
+        print(f"[{src['venue']}]", flush=True)
+        for url in src.get("urls", []):
+            variants = [url]
+            if url.startswith("https://"):
+                variants.append("http://" + url[len("https://"):])
+            if url.endswith("/"):
+                variants.append(url[:-1])
+            variants.append(url.rstrip("/") + "/*")
+            for v in variants:
+                q = ("https://web.archive.org/cdx/search/cdx?url={u}"
+                     "&output=json&limit=4&filter=statuscode:200"
+                     "&collapse=timestamp:4").format(u=quote(v, safe=""))
+                r = fetch(q)
+                rows = []
+                if r is not None:
+                    try:
+                        rows = json.loads(r.text or "[]")
+                    except json.JSONDecodeError:
+                        rows = []
+                n = max(0, len(rows) - 1)
+                when = ""
+                if n:
+                    head = rows[0]
+                    i = head.index("timestamp") if "timestamp" in head else 1
+                    ts = [row[i][:6] for row in rows[1:] if len(row) > i]
+                    when = "  " + " ".join(ts)
+                print(f"  {n:>2} 件  {v}{when}", flush=True)
+
+
 def months_between(a: date, b: date):
     """a の月から b の月まで、各月の1日を順に返す。"""
     y, m = a.year, a.month
@@ -238,8 +277,13 @@ def main() -> None:
                    help="終了月 YYYY-MM (既定 今月)")
     p.add_argument("--venue", default=None, help="この会場だけ")
     p.add_argument("--dry-run", action="store_true", help="書き出さず件数だけ出す")
+    p.add_argument("--check-archive", action="store_true",
+                   help="各取得先がどれだけ保存されているかだけ調べる")
     p.add_argument("--out", default=HISTORY_PATH, help="書き出し先")
     a = p.parse_args()
+    if a.check_archive:
+        check_archive()
+        return
     d_to = parse_ym(a.d_to) if a.d_to else now_jst().date().replace(day=1)
     run(parse_ym(a.d_from), d_to, a.dry_run, a.venue, a.out)
 

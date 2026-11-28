@@ -23,6 +23,10 @@ on:
         description: "書き出さず件数だけ見る"
         type: boolean
         default: true
+      check_archive:
+        description: "保存状況だけ調べる (取り込みはしない)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -47,7 +51,12 @@ jobs:
           TO: ${{ inputs.to }}
           VENUE: ${{ inputs.venue }}
           DRY: ${{ inputs.dry_run }}
+          CHECK: ${{ inputs.check_archive }}
         run: |
+          if [ "$CHECK" = "true" ]; then
+            python ariake/backfill.py --check-archive
+            exit 0
+          fi
           args="--from $FROM"
           [ -n "$TO" ] && args="$args --to $TO"
           [ -n "$VENUE" ] && args="$args --venue $VENUE"
@@ -56,7 +65,7 @@ jobs:
           python ariake/backfill.py $args
 
       - name: Commit events_history.json
-        if: ${{ inputs.dry_run == false }}
+        if: ${{ inputs.dry_run == false && inputs.check_archive == false }}
         run: |
           git config user.name "ariake-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
