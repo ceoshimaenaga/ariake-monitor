@@ -1,0 +1,38 @@
+name: pagesdomain
+
+# GitHub Pages の独自ドメインを設定する。
+# 配信物に CNAME を入れるだけでは紐づかないことがあるため、
+# 設定そのものを API で入れる。このプロジェクトのコンテナからは
+# この API パスに出られないので、ここで実行する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      cname:
+        description: "独自ドメイン (空にすると解除)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  pages: write
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set custom domain
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CNAME: ${{ inputs.cname }}
+        run: |
+          echo "--- 変更前 ---"
+          gh api "repos/$GITHUB_REPOSITORY/pages" || true
+          echo "--- 設定 ---"
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pages" \
+            -f "cname=$CNAME" || echo "失敗 (権限不足の可能性)"
+          echo "--- HTTPS 強制 ---"
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pages" \
+            -F "https_enforced=true" || echo "まだ証明書が無いと失敗する"
+          echo "--- 変更後 ---"
+          gh api "repos/$GITHUB_REPOSITORY/pages" || true
